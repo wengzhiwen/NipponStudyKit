@@ -86,13 +86,18 @@ async def main(u_name, u_url):
         result = await asyncio.wait_for(agent.run(max_steps=15), timeout=300)
     except Exception as e:
         logger.error(e)
+    finally:
+        try:
+            await browser.close()
+        except Exception as e:
+            logger.error(f"Error on close agent: {e}")
 
 # 为了并发套的壳子
 def run_main(u_name, u_url):
     asyncio.run(main(u_name, u_url))
     
 if __name__ == "__main__":
-    max_u = 20 # 调试时使用，限制单次处理的任务数
+    max_u = 5000 # 调试时使用，限制单次处理的任务数
     processed_u = 0
     max_threads = 15 # 看你的内存
     
