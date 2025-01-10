@@ -52,7 +52,9 @@
 
 ## STEP 4 img2md
 
-将分页的图片，逐页做OCR，同时进行markdown的转化和翻译。
+将分页的图片，逐页做**OCR**，同时进行markdown的转化和翻译。效果如下图：
+
+![示例动画](img2md.png)
 
 基于[img2md](https://github.com/wengzhiwen/img2md)项目进行修改。
 
