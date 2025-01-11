@@ -24,7 +24,6 @@ def set_google_cloud_api_key_json():
     print('The specified GOOGLE_APPLICATION_CREDENTIALS file does not exist.')
     print('Load from local .env settings...')
     
-    load_dotenv()
     GOOGLE_ACCOUNT_KEY_JSON = os.getenv('GOOGLE_ACCOUNT_KEY_JSON')
     
     if GOOGLE_ACCOUNT_KEY_JSON is not None and os.path.exists(GOOGLE_ACCOUNT_KEY_JSON):
@@ -75,6 +74,7 @@ def save_images_with_progress(images, output_folder):
 def ocr_by_google_cloud(image_path):
     """Perform OCR using Google Cloud Vision API"""
     client = vision.ImageAnnotatorClient()
+    print(f"OCR by Google Vision")
 
     try:
         with open(image_path, 'rb') as image_file:
@@ -97,6 +97,7 @@ def format_to_markdown_ref_image(text_content, image_path):
     """Format OCR text to markdown using Gemini"""
     genai.configure()
     model = genai.GenerativeModel(os.getenv('GEMINI_MODEL_FOR_FORMAT_MD', 'gemini-1.5-flash'))
+    print(f"Format OCR text to markdown by: {os.getenv('GEMINI_MODEL_FOR_FORMAT_MD', 'gemini-1.5-flash')}")
     
     try:
         img = Image.open(image_path)
@@ -104,42 +105,43 @@ def format_to_markdown_ref_image(text_content, image_path):
             "请参考以下图片的内容，将我提供的文本重新组织成 Markdown 格式。",
             img,
             f"文本内容：\n\n{text_content}",
-            "请注意保持文本的含义，并根据图片内容调整格式和排版风格。",
+            "\n\n请注意保持文本的含义，并根据图片内容调整格式和排版风格。",
+            "如果页面有明显的页头、页脚，请忽略页头和页脚的文字。",
             "如果文本中包含标题、段落等结构信息，请尽量在 Markdown 中保留。",
-            "请输出完整的 Markdown 格式文本。"
+            "请输出完整的 Markdown 格式文本，除非遇到源代码否则输出内容不要出现“```”系列的定界符。"
         ]
         response = model.generate_content(contents)
-        return response.text
+        return response.text.replace('```markdown\n', '').replace('```', '\n')
     except Exception as e:
         print(f"Error formatting to markdown: {e}")
         return None
 
-def translate_markdown(text_content, image_path):
+def translate_markdown(text_content):
     """Translate markdown to Chinese using Gemini"""
     genai.configure()
-    model = genai.GenerativeModel('gemini-1.5-pro-002')
+    model = genai.GenerativeModel(os.getenv('GEMINI_MODEL_FOR_TRANSLATE', 'gemini-1.5-flash'))
+    print(f"Translate by: {os.getenv('GEMINI_MODEL_FOR_TRANSLATE', 'gemini-1.5-flash')}")
     
     try:
-        img = Image.open(image_path)
         contents = [
+            "你是优秀的日中翻译专家，擅长翻译日本留学相关的信息。",
             "请将我提供的 Markdown 格式文本翻译成中文。",
             f"文本内容：\n\n{text_content}",
-            "同时提供上述文本内容的OCR前的原稿图片，以便更好地理解文本内容和格式。",
-            img,
-            "原稿图片仅供参考，翻译对象仍然是提供的文本内容。",
-            "请注意保持文本的含义，并核对原稿尽可能保持和原稿一致的格式。",
-            "请输出完整的翻译后的 Markdown 格式文本。"
+            "\n\n以上是待翻译的Markdown内容。",
+            "请注意保持文本的含义，并核对原稿尽可能保持和原稿一致的Markdown格式。",
+            "请输出完整的翻译后的 Markdown 格式文本，除非遇到源代码否则输出内容不要出现“```”系列的定界符。"
         ]
         response = model.generate_content(contents)
-        return response.text
+        return response.text.replace('```markdown\n', '').replace('```', '\n')
     except Exception as e:
-        print(f"Error translating markdown: {e}")
+        print(f"Error on translating markdown: {e}")
         return None
 
 def analyze_admission_info(md_content):
     """Analyze admission information using Gemini"""
     genai.configure()
     model = genai.GenerativeModel(os.getenv('GEMINI_MODEL_FOR_ORG_INFO', 'gemini-1.5-pro'))
+    print(f"Analyze admission information by: {os.getenv('GEMINI_MODEL_FOR_ORG_INFO', 'gemini-1.5-pro')}")
     
     prompt = '''请用中文回答我的问题：
         提示词最后添付的文本是根据从大学官网下载的原始PDF文件OCR成的markdown版本。
@@ -152,17 +154,7 @@ def analyze_admission_info(md_content):
             "大学名称": "大学的日语名称",
             "报名截止日期": "YYYY/MM/DD格式，如果有多个日期选择最晚的，无法确认则返回2099/01/01",
             "学校简介": "1-3句话描述，包含QS排名（如果有）",
-            "学校地址": "〒000-0000格式的邮编+详细地址",
-            "学部和专业信息": [
-                {
-                    "学部名": "学部名称",
-                    "专业名": "专业名称",
-                    "招生人数": "招生人数",
-                    "英语要求": "英语考试要求",
-                    "EJU要求": "日本留学试验要求",
-                    "面试要求": "面试相关要求"
-                }
-            ]
+            "学校地址": "〒000-0000格式的邮编+详细地址"
         }
         
         以下是添付的markdown内容：\n\n'''
@@ -251,12 +243,7 @@ def process_single_pdf(pdf_path, output_base_folder, dpi=100):
                 
                 # Translate to Chinese
                 print('Translating to Chinese...')
-                zh_content = ""
-                for img in image_files:
-                    print(f'Processing {os.path.basename(img)}...')
-                    trans_output = translate_markdown(md_content, img)
-                    if trans_output:
-                        zh_content += trans_output + '\n\n'
+                zh_content = translate_markdown(md_content)
                 
                 # Save Chinese translation with correct name
                 zh_md_path = os.path.join(output_folder, f'{base_name}_中文.md')
@@ -393,12 +380,12 @@ def generate_index_csv(output_folder):
     else:
         print("No valid entries found for index.csv")
 
-def main():
+def workflow(pdf_folder):
+    load_dotenv(override=True)
+
     # Setup Google Cloud credentials
     set_google_cloud_api_key_json()
     
-    # Get input folder
-    pdf_folder = "./pdf"
     if not os.path.exists(pdf_folder):
         print(f"PDF folder not found: {pdf_folder}")
         return
@@ -447,4 +434,4 @@ def main():
     generate_index_csv(output_folder)
 
 if __name__ == '__main__':
-    main()
+    workflow("./pdf")
