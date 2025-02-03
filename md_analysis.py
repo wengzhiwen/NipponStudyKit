@@ -6,6 +6,7 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_agentchat.conditions import ExternalTermination, TextMentionTermination
 import datetime
 import os
+import glob
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -53,7 +54,7 @@ def init_agents():
     markdown_loader_agent = AssistantAgent(
         name="Markdown_Loader_Agent",
         model_client=OpenAIChatCompletionClient(
-            model=os.getenv("GEMINI_MODEL_FOR_ANALYSIS"),
+            model=os.getenv("GEMINI_MODEL_FOR_TOOLS"),
             api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY"),
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             model_info={
@@ -73,11 +74,11 @@ def init_agents():
     markdown_analyzer_agent = AssistantAgent(
         name="Markdown_Analyzer_Agent",
         model_client=OpenAIChatCompletionClient(
-            model=os.getenv("GEMINI_MODEL_FOR_ANALYSIS"),
-            api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY"),
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            model=os.getenv("OPENROUTER_MODEL_FOR_ANALYSIS"),
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url=os.getenv("OPENROUTER_END_POINT"),
             model_info={
-                "vision": True,
+                "vision": False,
                 "function_calling": True,
                 "json_output": True,
                 "family": "unknown",
@@ -88,7 +89,7 @@ def init_agents():
                 你是一位严谨的Markdown分析助手,你根据Markdown_Loader_Agent的工作结果继续以下工作流：
                 1. 确认该文档是否含有针对'外国人留学生'的本科(学部)招生信息，如果不包含请输出“NOTCONTINUE”来结束任务，就此停止不要继续
                 2. 确认该文档中的报名日期的年份是否为2024年1月1日及以后的日期，如果不是请输出“NOTCONTINUE”来结束任务，就此停止不要继续
-                3. 仔细分析该文档内容,并对task中给出的问题逐一给出准确的回答。如果信息不确定,请明确指出。
+                3. 仔细分析该文档内容,并对task中给出的问题逐一用中文给出准确的回答。如果信息不确定,请明确指出。
                     - 回答问题时请务必按照问题的顺序逐一回答（每个回答后附上对原文的引用）
         ''',
     )
@@ -96,9 +97,9 @@ def init_agents():
     review_agent = AssistantAgent(
         name="Review_Agent",
         model_client=OpenAIChatCompletionClient(
-            model=os.getenv("GEMINI_MODEL_FOR_ANALYSIS"),
-            api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY"),
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            model=os.getenv("OPENROUTER_MODEL_FOR_ANALYSIS"),
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url=os.getenv("OPENROUTER_END_POINT"),
             model_info={
                 "vision": True,
                 "function_calling": True,
@@ -117,9 +118,9 @@ def init_agents():
     report_agent = AssistantAgent(
         name="Report_Agent",
         model_client=OpenAIChatCompletionClient(
-            model=os.getenv("GEMINI_MODEL_FOR_ANALYSIS"),
-            api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY"),
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            model=os.getenv("OPENROUTER_MODEL_FOR_ANALYSIS"),
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url=os.getenv("OPENROUTER_END_POINT"),
             model_info={
                 "vision": True,
                 "function_calling": True,
@@ -143,7 +144,7 @@ def init_agents():
     save_report_agent = AssistantAgent(
         name="Save_Report_Agent",
         model_client=OpenAIChatCompletionClient(
-            model=os.getenv("GEMINI_MODEL_FOR_ANALYSIS"),
+            model=os.getenv("GEMINI_MODEL_FOR_TOOLS"),
             api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY"),
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             model_info={
@@ -179,9 +180,6 @@ def init_agents():
     return markdown_loader_agent, markdown_analyzer_agent, review_agent, report_agent, save_report_agent
 
 async def main() -> None:
-    # 将本函数中的所有的控制台输出，全部同步输出到临时文件中，以便在后续的测试中进行查看
-    sys.stdout = open(f"output_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.txt", "w")
-    
     markdown_loader_agent, markdown_analyzer_agent, review_agent, report_agent, save_report_agent = init_agents()
     
     text_termination = TextMentionTermination("NOTCONTINUE")
@@ -192,40 +190,52 @@ async def main() -> None:
         termination_condition=text_termination
     )
     
-    questions = '''
-        1. 该文档中涉及的针对'外国人留学生'的招生信息中,具体涉及哪些本科(学部)的专业?
-        2. 该文档中涉及的针对'外国人留学生'的'报名截止日期(年月日)'是什么时间?
-        3. 该文档中涉及的针对'外国人留学生'的报名要求中是否包含托福或托业的成绩单、具体分数的说明?如果不同的专业有不同的要求请分别列举。
-        4. 该文档中涉及的针对'外国人留学生'的报名要求中针对在日本有超过12个月或是超过24个月的学习经历的学生是否有特殊限制?
-        5. 该文档中涉及的针对'外国人留学生'的报名要求中是否包含EJU(日本统一留学生考试)的成绩单、具体分数的说明?如果不同的专业有不同的要求请分别列举。
-        6. 该文档中涉及的针对'外国人留学生'的报名要求中是否包含JLPT或其他日语水平考试的要求?如果有的话,是否有具体分数的说明?如果不同的专业有不同的要求请分别列举。
-    '''
+    # 从md_analysis_questions.txt文件中读取问题
+    with open("md_analysis_questions.txt", "r", encoding="utf-8") as f:
+        questions = f.read()
+        
+    # 所有以"pdf_with_md"开头的文件夹中遍历其下的所有子文件夹，找到其中所有*.md文件(忽略文件名中包含"_中文"或"_report"的文件)
+    # 遍历这些符合要求的文件，将其路径作为markdown_file_path参数传入到team.run_stream()中
+    base_dirs = glob.glob('pdf_with_md*')
     
-    team.reset()
+    md_files = []
     
-    markdown_file_path = "./pdf_with_md_20250112103823/東京理科大学_2023-11-30/東京理科大学_2023-11-30.md"
+    for base_dir in base_dirs:
+        for root, dirs, files in os.walk(base_dir):
+            for file in files:
+                if file.endswith('.md'):
+                    if '_中文' not in file and '_report' not in file:
+                        full_path = os.path.join(root, file)
+                        md_files.append(full_path)
     
-    output_file_path = "./pdf_with_md_20250112103823/東京理科大学_2023-11-30/東京理科大学_2023-11-30_report.md"
+    for markdown_file_path in md_files:
+        print(f"开始处理：{markdown_file_path}")
+        
+        output_file_path = markdown_file_path.replace(".md", "_report.md")
+        team.reset()
     
-    task = f'''
-        请帮我分析以下路径所指定的Markdown文档中的内容,并回答问题：
-        
-        markdown_file_path = {markdown_file_path}
-        
-        ---
-        虽然文档内容是日语，但以下的问题和问题的答案都是用简体中文：
-        
-        {questions}
-        
-        ---
-        以上是我的问题，请务必严格按照Markdown文档中的内容回答问题。
-        
-        并将最终的报告保存到以下路径：
-        
-        report_file_path = {output_file_path}
-    '''
-    
-    await Console(team.run_stream(task=task))    
+        task = f'''
+            请帮我分析以下路径所指定的Markdown文档中的内容,并回答问题：
+            
+            markdown_file_path = {markdown_file_path}
+            
+            ---
+            虽然文档内容是日语，但以下的问题和问题的答案都是用简体中文：
+            
+            {questions}
+            
+            ---
+            以上是我的问题，请务必严格按照Markdown文档中的内容回答问题。
+            
+            并将最终的报告保存到以下路径：
+            
+            report_file_path = {output_file_path}
+        '''
+
+        sys.stdout = open(f"output_{os.path.basename(markdown_file_path)}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.txt", "w")
+        await Console(team.run_stream(task=task))
+        # 重置sys.stdout为控制台输出
+        sys.stdout = sys.__stdout__
 
 if __name__ == "__main__":
     import asyncio
