@@ -10,26 +10,39 @@ import logging
 load_dotenv()
 
 llm_config = {
-    "model": os.getenv("GEMINI_MODEL_FOR_TOOLS"),
-    "api_key": os.getenv("GOOGLE_AI_STUDIO_API_KEY"),
-    "api_type": "google",
-    "temperature": 0.5,
+    "config_list": [{
+        "model": os.getenv("DEEPSEEK_MODEL_FOR_ANALYSIS"),
+        "api_key": os.getenv("DEEPSEEK_API_KEY"),
+        "base_url": os.getenv("DEEPSEEK_END_POINT"),
+        "api_type": "openai",
+        "temperature": 0.5,
+        "price": [0.001, 0.001],
+    },{
+        "model": os.getenv("OPENROUTER_MODEL_FOR_ANALYSIS"),
+        "api_key": os.getenv("OPENROUTER_API_KEY"),
+        "base_url": os.getenv("OPENROUTER_END_POINT"),
+        "api_type": "openai",
+        "temperature": 0.5,
+        "price": [0.001, 0.001],
+    }]
 }
 
-llm_config_openrouter = {
-    "model": os.getenv("OPENROUTER_MODEL_FOR_ANALYSIS"),
-    "api_key": os.getenv("OPENROUTER_API_KEY"),
-    "base_url": os.getenv("OPENROUTER_END_POINT"),
-    "api_type": "openai",
-    "temperature": 0.5,
-}
-
-llm_config_openrouter_mini = {
-    "model": os.getenv("OPENROUTER_MODEL_FOR_REPORT"),
-    "api_key": os.getenv("OPENROUTER_API_KEY"),
-    "base_url": os.getenv("OPENROUTER_END_POINT"),
-    "api_type": "openai",
-    "temperature": 0.5,
+llm_config_mini = {
+    "config_list": [{
+        "model": os.getenv("DEEPSEEK_MODEL_FOR_REPORT"),
+        "api_key": os.getenv("DEEPSEEK_API_KEY"),
+        "base_url": os.getenv("DEEPSEEK_END_POINT"),
+        "api_type": "openai",
+        "temperature": 0.5,
+        "price": [0.001, 0.001],
+    },{
+        "model": os.getenv("OPENROUTER_MODEL_FOR_REPORT"),
+        "api_key": os.getenv("OPENROUTER_API_KEY"),
+        "base_url": os.getenv("OPENROUTER_END_POINT"),
+        "api_type": "openai",
+        "temperature": 0.5,
+        "price": [0.001, 0.001],
+    }]
 }
 
 logger = logging.getLogger(__name__)
@@ -91,16 +104,6 @@ def save_report_to_file(report_content: str, report_file_path: str) -> str:
     # 如果文件夹不存在则创建文件夹
     os.makedirs(os.path.dirname(report_file_path), exist_ok=True)
 
-    # 如果文件已存在，将原文件以.年月日时分秒.bak后缀备份
-    if os.path.exists(report_file_path):
-        bak_file_path = (
-            report_file_path
-            + "."
-            + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-            + ".bak"
-        )
-        os.rename(report_file_path, bak_file_path)
-
     with open(report_file_path, "w", encoding="utf-8") as f:
         f.write(report_content)
     
@@ -109,25 +112,24 @@ def save_report_to_file(report_content: str, report_file_path: str) -> str:
 def init_agents():
     markdown_analyzer_agent = ConversableAgent(
         name="Markdown_Analyzer_Agent",
-        llm_config=llm_config_openrouter,
+        llm_config=llm_config,
         human_input_mode="NEVER",
         description="日本大学留学生招生信息分析Agent",
         system_message="""
                 你是一位严谨的Markdown分析助手,你根据Markdown_Loader_Agent的工作结果继续以下工作流：
-                1. 确认该文档是否含有针对'外国人留学生'的本科(学部)招生信息，如果不包含请输出“NOTCONTINUE”并说明理由来结束任务，就此停止不要继续
-                    - 除了明确的说明之外：如果文档中含有“EJU（留学生统一考试）”或“托福、托业等第三方英语考试”相关的信息的话，可以认为是针对外国人留学生的招生信息
-                2. 仔细分析该文档内容,并对task中给出的问题逐一用中文给出准确的回答。如果信息不确定,请明确指出。
+                1. 仔细分析该文档内容,并对task中给出的问题逐一用中文给出准确的回答。如果信息不确定,请明确指出。
                     - 回答问题时请务必按照问题的顺序逐一回答（每个回答后附上对原文的引用）
                     - 输出的结果中不需要包含任何额外的信息，只需要回答问题即可
                     - 输出的结果中不要包含任何文档路径相关的信息
-                3. 请严格按照文档来回答问题，不要进行任何额外的推测或猜测！
+                    - 请忽略最终要将结果保存到文件的步骤，只需要回答问题即可。保存工作会由其他Agent接手
+                    - 请严格按照文档来回答问题，不要进行任何额外的推测或猜测！
         """,
         is_termination_msg=lambda x: "NOTCONTINUE" in (x.get("content", "") or "").upper(),
     )
 
     review_agent = ConversableAgent(
         name="Review_Agent",
-        llm_config=llm_config_openrouter,
+        llm_config=llm_config_mini,
         human_input_mode="NEVER",
         description="分析结果检查Agent",
         system_message="""
@@ -136,6 +138,7 @@ def init_agents():
                 1. 逐一核对,针对其中不相符的情况直接对分析结果进行修正。
                     - 不论你是否发现错误，请将修正后的完整分析结果告诉大家，每个问题所关联的原文的引用需要保留；
                     - 请严格按照文档来校对和修正，不要进行任何额外的推测或猜测！
+                    - 请忽略最终要将结果保存到文件的步骤，只需要回答问题即可。保存工作会由其他Agent接手
                 2. 确认是否有语法错误，针对其中的中文部分和日语部分的语法错误分别进行修正。
         """,
         is_termination_msg=lambda x: "NOTCONTINUE" in (x.get("content", "") or "").upper(),
@@ -143,7 +146,7 @@ def init_agents():
 
     report_agent = ConversableAgent(
         name="Report_Agent",
-        llm_config=llm_config_openrouter_mini,
+        llm_config=llm_config_mini,
         human_input_mode="NEVER",
         description="报告生成Agent",
         system_message="""
@@ -157,6 +160,7 @@ def init_agents():
                     - 最终的报告中不需要包含任何文档路径、分析时间、特别提示等额外信息；
                     - 如果问题的回答有关联原文的引用的，保留引用内容，如果没有的也不需要额外添加说明；
                     - 你整理的最终报告用于给人类用户阅读，请尽可能使用表格、加粗、斜体等Markdown格式来使报告更易读；
+                    - 请忽略最终要将结果保存到文件的步骤，只需要回答问题即可。保存工作会由其他Agent接手
                     - 不要在你输出的内容前后再额外使用“```markdown”之类的定界符！
         """,
         is_termination_msg=lambda x: "NOTCONTINUE" in (x.get("content", "") or "").upper(),
@@ -164,7 +168,7 @@ def init_agents():
 
     save_report_agent = ConversableAgent(
         name="Save_Report_Agent",
-        llm_config=llm_config,
+        llm_config=llm_config_mini,
         human_input_mode="NEVER",
         description="报告保存Agent",
         system_message="""
@@ -211,11 +215,6 @@ def main(base_folder: str) -> None:
         save_report_agent,
     ) = init_agents()
 
-    logger.debug(f"markdown_analyzer_agent使用模型：{markdown_analyzer_agent.llm_config['model']}")
-    logger.debug(f"review_agent使用模型：{review_agent.llm_config['model']}")
-    logger.debug(f"report_agent使用模型：{report_agent.llm_config['model']}")
-    logger.debug(f"save_report_agent使用模型：{save_report_agent.llm_config['model']}")
-
     user_proxy = UserProxyAgent(
         name="user_proxy",
         human_input_mode="NEVER",
@@ -236,7 +235,7 @@ def main(base_folder: str) -> None:
         messages=[]
     )
     
-    manager = GroupChatManager(groupchat=team, llm_config=llm_config)
+    manager = GroupChatManager(groupchat=team, llm_config=llm_config_mini)
 
     # 从md_analysis_questions.txt文件中读取问题
     with open("md_analysis_questions.txt", "r", encoding="utf-8") as f:
@@ -265,18 +264,27 @@ def main(base_folder: str) -> None:
         manager.reset()
         
         output_file_path = markdown_file_path.replace(".md", "_report.md")
+        # 如果文件已存在，将原文件以.年月日时分秒.bak后缀备份
+        if os.path.exists(output_file_path):
+            bak_file_path = (
+                output_file_path
+                + "."
+                + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                + ".bak"
+            )
+            os.rename(output_file_path, bak_file_path)
         
         md_content = load_markdown_file(markdown_file_path)
 
         task = f"""
             请帮我分析以下Markdown文档中的内容,并回答问题：
             
-            {md_content}
+{md_content}
             
             ---
-            以上是Markdown文档的内容，虽然文档内容是日语，但以下的问题和问题的答案都是用简体中文：
+            以上是Markdown文档的内容，虽然文档内容是日语，但以下的问题和问题的答案都使用简体中文：
             
-            {questions}
+{questions}
             
             ---
             以上是我的问题，请务必严格按照Markdown文档中的内容回答问题。
@@ -285,8 +293,8 @@ def main(base_folder: str) -> None:
             
             report_file_path = {output_file_path}
         """
-
-        sys.stdout = open(f"output_{os.path.basename(markdown_file_path)}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.txt", "w")
+        std_output_file = f"output_{os.path.basename(markdown_file_path)}_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.txt"
+        sys.stdout = open(std_output_file, "w")
         try:
             user_proxy.initiate_chat(
                 recipient=manager,
@@ -302,6 +310,16 @@ def main(base_folder: str) -> None:
             logger.error(f"未能完成: {markdown_file_path} 的分析，发生错误: {e}")
         finally:
             logger.info(f"完成处理：{markdown_file_path}")
+            
+        # 检查是否有报告生成
+        if os.path.exists(output_file_path):
+            logger.info(f"确认已生成报告：{output_file_path}")
+            if os.getenv("LOG_LEVEL") == "INFO":
+                # 删除std_output_file
+                os.remove(std_output_file)
+                logger.info(f"删除：{std_output_file}")
+        else:
+            logger.error(f"未生成报告：{output_file_path}")
             
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='招生信息Markdown文档分析')
