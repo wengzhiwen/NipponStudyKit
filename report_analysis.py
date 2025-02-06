@@ -91,6 +91,9 @@ def save_report_to_file(report_content: str, report_file_path: str) -> str:
     """
     print(f"save_report_to_file - report_file_path: {report_file_path}")
     
+    # 根据report_file_path，获取report_file_path的完全路径
+    report_file_path = os.path.abspath(report_file_path)
+    
     # 如果文件夹不存在则创建文件夹
     os.makedirs(os.path.dirname(report_file_path), exist_ok=True)
     
@@ -272,8 +275,10 @@ if __name__ == "__main__":
     
     setup_logger()
     
-    output_file_path = os.path.join(os.path.curdir, os.path.dirname(base_folder) + ".csv")
-    
+    # 提取base_folder的完全路径
+    base_folder_path = os.path.abspath(base_folder)
+    # 设定output_file_path = base_folder所指向的文件夹的名字
+    output_file_path = os.path.basename(base_folder_path) + ".csv"
     # 如果文件已经存在，将显存文件以 原文件名_年月日时分秒.bak改名
     if os.path.exists(output_file_path):
         os.rename(output_file_path, output_file_path.replace(".csv", f"_{datetime.datetime.now().strftime("%Y%m%d%H%M%S")}.bak"))
