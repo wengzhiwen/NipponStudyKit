@@ -11,13 +11,6 @@ load_dotenv()
 
 llm_config = {
     "config_list": [{
-        "model": os.getenv("DEEPSEEK_MODEL_FOR_ANALYSIS"),
-        "api_key": os.getenv("DEEPSEEK_API_KEY"),
-        "base_url": os.getenv("DEEPSEEK_END_POINT"),
-        "api_type": "openai",
-        "temperature": 0.5,
-        "price": [0.001, 0.001],
-    },{
         "model": os.getenv("OPENROUTER_MODEL_FOR_ANALYSIS"),
         "api_key": os.getenv("OPENROUTER_API_KEY"),
         "base_url": os.getenv("OPENROUTER_END_POINT"),
@@ -29,13 +22,6 @@ llm_config = {
 
 llm_config_mini = {
     "config_list": [{
-        "model": os.getenv("DEEPSEEK_MODEL_FOR_REPORT"),
-        "api_key": os.getenv("DEEPSEEK_API_KEY"),
-        "base_url": os.getenv("DEEPSEEK_END_POINT"),
-        "api_type": "openai",
-        "temperature": 0.5,
-        "price": [0.001, 0.001],
-    },{
         "model": os.getenv("OPENROUTER_MODEL_FOR_REPORT"),
         "api_key": os.getenv("OPENROUTER_API_KEY"),
         "base_url": os.getenv("OPENROUTER_END_POINT"),
@@ -116,7 +102,7 @@ def init_agents():
         human_input_mode="NEVER",
         description="日本大学留学生招生信息分析Agent",
         system_message="""
-                你是一位严谨的Markdown分析助手,你根据Markdown_Loader_Agent的工作结果继续以下工作流：
+                你是一位严谨的Markdown分析助手,你根据User_Proxy_Agent提供的内容继续以下工作流：
                 1. 仔细分析该文档内容,并对task中给出的问题逐一用中文给出准确的回答。如果信息不确定,请明确指出。
                     - 回答问题时请务必按照问题的顺序逐一回答（每个回答后附上对原文的引用）
                     - 输出的结果中不需要包含任何额外的信息，只需要回答问题即可
@@ -216,7 +202,7 @@ def main(base_folder: str) -> None:
     ) = init_agents()
 
     user_proxy = UserProxyAgent(
-        name="user_proxy",
+        name="User_Proxy_Agent",
         human_input_mode="NEVER",
         llm_config=False,
         code_execution_config=False,
