@@ -8,9 +8,9 @@ from loguru import logger
 from concurrent.futures import ThreadPoolExecutor
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, SecretStr
-from browser_use.agent.service import Agent  # type: ignore
-from browser_use.controller.service import Controller  # type: ignore
-from browser_use.browser.browser import Browser # type: ignore
+from browser_use.agent.service import Agent
+from browser_use.controller.service import Controller
+from browser_use.browser.browser import Browser
 
 class Pdf(BaseModel):
     u_name: str
@@ -67,9 +67,9 @@ model = ChatOpenAI(
     },
 )
 
-async def main(u_name, u_url):
+async def main(u_name: str):
     task = (
-        "Googleで{}の学部の私費外国人留学生選抜の募集要項と関連するトップ５のPDFドキュメントを探してくれ。".format(
+        "Googleで{}の2026年度（令和8年度）の学部の私費外国人留学生選抜の募集要項と関連するトップ５のPDFドキュメントを探してくれ。".format(
             u_name
         ),
         "探したPDFのURLは正しいかどうか（ダウンロードできる、４０３・４０４なし）を確認してくれ、OKの場合：",
@@ -79,6 +79,9 @@ async def main(u_name, u_url):
         "PDFドキュメントは１つだけでもいい。該当大学の学部の私費外国人留学生選抜の募集要項があったら、タスクを終了してくれ。",
         "連続して同じPDFドキュメントが見つかったら、検索を中止してくれ。"
     )
+    
+    logger.debug(f"Task: {task[:50]}")
+    
     browser = Browser()
     browser.config.headless = False # 虽然说理论上支持headless模式，但我测试下来根本不靠谱
     agent = Agent(task, model, browser, controller=controller, use_vision=True)
@@ -93,8 +96,8 @@ async def main(u_name, u_url):
             logger.error(f"Error on close agent: {e}")
 
 # 为了并发套的壳子
-def run_main(u_name, u_url):
-    asyncio.run(main(u_name, u_url))
+def run_main(u_name):
+    asyncio.run(main(u_name))
     
 if __name__ == "__main__":
     max_u = 5000 # 调试时使用，限制单次处理的任务数
@@ -103,15 +106,18 @@ if __name__ == "__main__":
     
     # 读取学校列表文件，将每一行的内容作为一个任务，调用main函数
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
-        with open("./eju_accepted_u_list_2024_12.csv", "r") as f:
+        with open("./u_list.csv", "r") as f:
             for line in f:
                 try:                    
                     if processed_u >= max_u:
                         break
                     
-                    u_type, u_name, u_area, u_url = line.strip().split(",")
-                    t = executor.submit(run_main, u_name, u_url)
-                    processed_u += 1
+                    u_name, last_ad_date, last_ad_month = line.strip().split(",")
+                    
+                    if last_ad_month in(4,5,6) or last_ad_month in ("04","05","06"):
+                        logger.info("process {} @ {}".format(u_name, last_ad_month))
+                        t = executor.submit(run_main, u_name)
+                        processed_u += 1
                 except Exception as e:
                     logger.error(e)
                     continue
