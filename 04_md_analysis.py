@@ -113,25 +113,40 @@ class MDAnalysisService:
             self.tools.save_report_to_file(report_content, report_file_path)
             return SwarmResult(agent=AfterWorkOption.TERMINATE, context_variables=context_variables)
 
+        # 读取分析问题
+        with open("md_analysis_questions.txt", "r", encoding="utf-8") as f:
+            questions = f.read()
+
         # 创建分析agent
         self.markdown_analyzer_agent = ConversableAgent(
             name="Markdown_Analyzer_Agent",
             llm_config=self.config.llm_config,
             human_input_mode="NEVER",
             description="日本大学留学生招生信息分析Agent",
-            system_message="""你是一位严谨的日本留学信息专家,你根据用户最初输入的完整Markdown内容继续以下工作流：
+            system_message=f"""你是一位严谨的日本留学信息专家,你根据用户最初输入的完整Markdown内容继续以下工作流：
 0. Markdown原文可能很长，因为有些Markdown包含了大量和留学生入学无关的信息，可以先将这部分信息排除再进行分析
-1. 仔细分析该文档内容,并对task中给出的问题逐一用中文给出准确的回答。如果信息不确定,请明确指出。
+ - 但是要注意，有些学校可能不会直接使用'外国人留学生'这样的说法，但他们事实上招收留学生，如：
+   - 允许没有日本国籍的人报名
+   - 允许报名者在海外接受中小学教育
+   - 允许使用EJU（日本留学生考试）的成绩报名
+ - 有些学校的部分专业对外国人和日本人一视同仁，允许日本人报名的专业同时也允许外国人报名，这类专业视同招收留学生
+1. 仔细分析该文档内容,并对以下问题逐一用中文给出准确的回答。如果信息不确定,请明确指出。
     - 回答问题时请务必按照问题的顺序逐一回答（每个回答后附上对原文的引用）
     - 输出的结果中不需要包含任何额外的信息，只需要回答问题即可
     - 输出的结果中不要包含任何文档路径相关的信息
     - 请严格按照文档来回答问题，不要进行任何额外的推测或猜测！
-2. 请仅将你的分析结果的正文直接返回，不要带有任何的说明性文字。
+2. 分析报告包含每个问题以及对应的回答，请严格按照问题顺序依次回答。
+3. 请仅将你的分析结果的正文直接返回，不要带有任何的说明性文字。
+
+以下是需要分析的问题：
+
+{questions}
 
 请注意：
  - 用户需要的是完整的分析结果，不要仅仅提供原文的引用
- - 不要进行寒暄，直接开始工作。
- - 不要在回答中包含任何额外的信息，只需要直接开始回答问题即可。""",
+ - 不要进行寒暄，直接开始工作
+ - 不要在回答中包含任何额外的信息，只需要直接开始回答问题即可
+ - 每一个问题都要回答，如果信息不确定，就明确指出“无法确定”，不要跳过任何问题""",
         )
 
         # 创建审核agent
@@ -194,6 +209,11 @@ class MDAnalysisService:
             for root, _, files in os.walk(base_dir):
                 for file in files:
                     if file.endswith(".md"):
+                        # 跳过scan_开头的文件
+                        if file.startswith("scan_"):
+                            self.logger.debug(f"跳过scan_开头的文件：{file}")
+                            continue
+                        
                         if "_中文" not in file and "_report" not in file:
                             full_path = os.path.join(root, file)
 
@@ -219,7 +239,7 @@ class MDAnalysisService:
             bak_file_path = output_file_path + "." + datetime.datetime.now().strftime("%Y%m%d%H%M%S") + ".bak"
             os.rename(output_file_path, bak_file_path)
 
-    def process_single_file(self, markdown_file_path: str, questions: str) -> None:
+    def process_single_file(self, markdown_file_path: str) -> None:
         """处理单个Markdown文件"""
         self.logger.info(f"开始处理：{markdown_file_path}")
 
@@ -244,12 +264,6 @@ class MDAnalysisService:
                 # 第一步：运行markdown_analyzer_agent的分析
                 # 准备分析提示
                 analysis_prompt = f"""请分析以下Markdown文档内容。
-文档内容是日语，但请用简体中文回答以下问题：
-
-{questions}
-
----
-文档内容：
 
 {md_content}
 
@@ -322,9 +336,6 @@ class MDAnalysisService:
             base_folder (str): 基础文件夹路径
             review_mode (bool): 是否为review模式，默认为False
         """
-        # 读取分析问题
-        with open("md_analysis_questions.txt", "r", encoding="utf-8") as f:
-            questions = f.read()
 
         # 查找所有需要处理的Markdown文件
         md_files = self.find_markdown_files(base_folder, review_mode)
@@ -333,7 +344,7 @@ class MDAnalysisService:
         for markdown_file_path in md_files:
             # 为每个文件重新初始化agents
             self.init_agents()
-            self.process_single_file(markdown_file_path, questions)
+            self.process_single_file(markdown_file_path)
             self.logger.info(f"处理完成：{markdown_file_path}")
 
 
