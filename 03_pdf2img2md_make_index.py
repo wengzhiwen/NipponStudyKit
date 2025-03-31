@@ -401,12 +401,27 @@ def process_single_pdf(pdf_path, output_base_folder, resume_dir=None):
                 with open(md_path, 'w', encoding='utf-8') as f:
                     f.write(md_content)
 
+                # 检查是否需要重新翻译
+                zh_md_path = os.path.join(output_folder, f'{base_name}_中文.md')
+                if os.path.exists(zh_md_path):
+                    # 比较中文版和日文版的行数
+                    with open(zh_md_path, 'r', encoding='utf-8') as f:
+                        zh_lines = len([line for line in f if line.strip()])
+                    jp_lines = len([line for line in md_content.split('\n') if line.strip()])
+
+                    # 计算行数差异百分比
+                    line_diff_percent = abs(zh_lines - jp_lines) / max(zh_lines, jp_lines) * 100
+                    if line_diff_percent > 15:
+                        print(f'中文版与日文版行数差异超过15%（{line_diff_percent:.1f}%），需要重新翻译')
+                        need_translate = True
+                    else:
+                        print(f'中文版与日文版行数差异在允许范围内（{line_diff_percent:.1f}%），无需重新翻译')
+
                 # Translate to Chinese if needed
                 if need_translate:
                     print('Translating to Chinese...')
                     zh_content = translate_markdown(md_content)
                     if zh_content:
-                        zh_md_path = os.path.join(output_folder, f'{base_name}_中文.md')
                         with open(zh_md_path, 'w', encoding='utf-8') as f:
                             f.write(zh_content)
 
