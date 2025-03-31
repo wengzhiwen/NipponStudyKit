@@ -290,72 +290,165 @@ def sanitize_filename(filename):
     return filename
 
 
-def process_single_pdf(pdf_path, output_base_folder, dpi=100):
-    """Process a single PDF file"""
+def process_single_pdf(pdf_path, output_base_folder, dpi=100, load_progress=True):
+    """Process a single PDF file
+    
+    Args:
+        pdf_path (str): PDF文件路径
+        output_base_folder (str): 输出基础目录
+        dpi (int): PDF转图片的DPI
+        load_progress (bool): 是否加载进度文件
+    """
     try:
         # Create output folder with sanitized PDF basename
         base_name = sanitize_filename(os.path.splitext(os.path.basename(pdf_path))[0])
         output_folder = os.path.join(output_base_folder, base_name)
         os.makedirs(output_folder, exist_ok=True)
 
-        # Copy original PDF
-        shutil.copy2(pdf_path, output_folder)
+        # 检查进度文件
+        progress_file = os.path.join(output_folder, 'progress.json')
+        progress = {}
+        if load_progress and os.path.exists(progress_file):
+            with open(progress_file, 'r', encoding='utf-8') as f:
+                progress = json.load(f)
+        else:
+            # 如果不加载进度或进度文件不存在，删除可能存在的旧文件
+            if os.path.exists(progress_file):
+                os.remove(progress_file)
+            for file in os.listdir(output_folder):
+                if file.endswith('.png') or file.endswith('.md'):
+                    os.remove(os.path.join(output_folder, file))
 
-        # Convert PDF to images
-        print(f'Converting {pdf_path} to images...')
-        images = convert_pdf_to_images(pdf_path, dpi)
-        save_images_with_progress(images, output_folder)
+        # Copy original PDF if not already done
+        if 'pdf_copied' not in progress:
+            shutil.copy2(pdf_path, output_folder)
+            progress['pdf_copied'] = True
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress, f)
+
+        # Convert PDF to images if not already done
+        if 'images_converted' not in progress:
+            print(f'Converting {pdf_path} to images...')
+            images = convert_pdf_to_images(pdf_path, dpi)
+            save_images_with_progress(images, output_folder)
+            progress['images_converted'] = True
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress, f)
 
         # Process images to markdown
-        print('Processing images to markdown...')
-        image_files = natsorted(glob.glob(f'{output_folder}/*.png'))
+        if 'ocr_completed' not in progress:
+            print('Processing images to markdown...')
+            image_files = natsorted(glob.glob(f'{output_folder}/*.png'))
+            md_content = ""
 
-        md_content = ""
-        for img in image_files:
-            print(f'Processing {os.path.basename(img)}...')
-            text_content = ocr_by_google_cloud(img)
-            markdown_output = format_to_markdown_ref_image(text_content, img)
-            if markdown_output:
-                md_content += markdown_output + '\n\n'
+            # 初始化OCR结果字典
+            if 'ocr_results' not in progress:
+                progress['ocr_results'] = {}
 
-        # Analyze admission info first to get the correct base name
-        print('Analyzing admission information...')
-        info = analyze_admission_info(md_content)
-        if info == "NO":
-            print(f'Not an admission handbook, removing folder: {output_folder}')
-            shutil.rmtree(output_folder)
-            return False
-        else:
-            try:
-                info_dict = json.loads(info)
-                new_folder_name = sanitize_filename(f"{info_dict['大学名称']}_{info_dict['报名截止日期']}")
-                new_folder_path = os.path.join(output_base_folder, new_folder_name)
-                base_name = sanitize_filename(f"{info_dict['大学名称']}_{info_dict['报名截止日期']}")
+            for img in image_files:
+                img_name = os.path.basename(img)
+                print(f'Processing {img_name}...')
+                try:
+                    # 如果已经有OCR结果，直接使用
+                    if img_name in progress['ocr_results']:
+                        text_content = progress['ocr_results'][img_name]
+                    else:
+                        text_content = ocr_by_google_cloud(img)
+                        # 保存OCR结果
+                        progress['ocr_results'][img_name] = text_content
+                        with open(progress_file, 'w', encoding='utf-8') as f:
+                            json.dump(progress, f)
 
-                # Save markdown content with correct name
-                md_path = os.path.join(output_folder, f'{base_name}.md')
-                with open(md_path, 'w', encoding='utf-8') as f:
-                    f.write(md_content)
+                    # 如果已经有markdown结果，直接使用
+                    if img_name in progress.get('markdown_results', {}):
+                        markdown_output = progress['markdown_results'][img_name]
+                    else:
+                        markdown_output = format_to_markdown_ref_image(text_content, img)
+                        # 保存markdown结果
+                        if 'markdown_results' not in progress:
+                            progress['markdown_results'] = {}
+                        progress['markdown_results'][img_name] = markdown_output
+                        with open(progress_file, 'w', encoding='utf-8') as f:
+                            json.dump(progress, f)
 
-                # Translate to Chinese
-                print('Translating to Chinese...')
-                zh_content = translate_markdown(md_content)
+                    if markdown_output:
+                        md_content += markdown_output + '\n\n'
+                except Exception as e:
+                    print(f"Error processing {img}: {e}")
+                    # 保存当前进度
+                    progress['ocr_completed'] = False
+                    progress['last_processed_image'] = img_name
+                    with open(progress_file, 'w', encoding='utf-8') as f:
+                        json.dump(progress, f)
+                    raise e
 
-                # Save Chinese translation with correct name
+            progress['ocr_completed'] = True
+            progress['full_markdown'] = md_content  # 保存完整的markdown内容
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress, f)
+
+        # Analyze admission info
+        if 'info_analyzed' not in progress:
+            print('Analyzing admission information...')
+            # 使用保存的markdown内容
+            md_content = progress.get('full_markdown', '')
+            info = analyze_admission_info(md_content)
+            if info == "NO":
+                print(f'Not an admission handbook, removing folder: {output_folder}')
+                shutil.rmtree(output_folder)
+                return False
+            else:
+                try:
+                    info_dict = json.loads(info)
+                    new_folder_name = sanitize_filename(f"{info_dict['大学名称']}_{info_dict['报名截止日期']}")
+                    new_folder_path = os.path.join(output_base_folder, new_folder_name)
+                    base_name = sanitize_filename(f"{info_dict['大学名称']}_{info_dict['报名截止日期']}")
+
+                    # Save markdown content
+                    md_path = os.path.join(output_folder, f'{base_name}.md')
+                    with open(md_path, 'w', encoding='utf-8') as f:
+                        f.write(md_content)
+
+                    progress['info_analyzed'] = True
+                    progress['admission_info'] = info_dict  # 保存招生信息
+                    with open(progress_file, 'w', encoding='utf-8') as f:
+                        json.dump(progress, f)
+                except Exception as e:
+                    print(f"Error analyzing admission info: {e}")
+                    return False
+
+        # Translate to Chinese
+        if 'translation_completed' not in progress:
+            print('Translating to Chinese...')
+            # 使用保存的markdown内容
+            md_content = progress.get('full_markdown', '')
+            zh_content = translate_markdown(md_content)
+            if zh_content:
                 zh_md_path = os.path.join(output_folder, f'{base_name}_中文.md')
                 with open(zh_md_path, 'w', encoding='utf-8') as f:
                     f.write(zh_content)
+                progress['translation_completed'] = True
+                progress['chinese_translation'] = zh_content  # 保存中文翻译
+                with open(progress_file, 'w', encoding='utf-8') as f:
+                    json.dump(progress, f)
 
-                # Rename folder and PDF
-                os.rename(output_folder, new_folder_path)
-                old_pdf = os.path.join(new_folder_path, os.path.basename(pdf_path))
-                new_pdf = os.path.join(new_folder_path, f"{base_name}.pdf")
-                os.rename(old_pdf, new_pdf)
+        # Rename folder and files
+        if 'renaming_completed' not in progress:
+            # 使用保存的招生信息
+            info_dict = progress.get('admission_info', {})
+            new_folder_name = sanitize_filename(f"{info_dict['大学名称']}_{info_dict['报名截止日期']}")
+            new_folder_path = os.path.join(output_base_folder, new_folder_name)
+            base_name = sanitize_filename(f"{info_dict['大学名称']}_{info_dict['报名截止日期']}")
 
-                return True
-            except Exception as e:
-                print(f"Error processing admission info: {e}")
-                return False
+            os.rename(output_folder, new_folder_path)
+            old_pdf = os.path.join(new_folder_path, os.path.basename(pdf_path))
+            new_pdf = os.path.join(new_folder_path, f"{base_name}.pdf")
+            os.rename(old_pdf, new_pdf)
+            progress['renaming_completed'] = True
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress, f)
+
+        return True
 
     except Exception as e:
         print(f"Error processing PDF: {e}")
@@ -471,7 +564,7 @@ def generate_index_csv(output_folder):
         print("No valid entries found for index.csv")
 
 
-def workflow(pdf_folder):
+def workflow(pdf_folder, load_progress=True):
     load_dotenv(override=True)
 
     # Setup Google Cloud credentials
@@ -507,7 +600,7 @@ def workflow(pdf_folder):
         images = convert_pdf_to_images(pdf_path, 100)
         total_pages += len(images)
 
-        if process_single_pdf(pdf_path, output_folder):
+        if process_single_pdf(pdf_path, output_folder, load_progress=load_progress):
             valid_handbooks += 1
         processed_pdfs += 1
 
@@ -669,6 +762,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='将PDF文件转换为Markdown格式并提取招生信息')
     parser.add_argument('dir', help='目录路径')
     parser.add_argument('--review', action='store_true', help='启用review模式，检查并修复已处理的结果')
+    parser.add_argument('--no-progress', action='store_true', help='不加载进度文件，完全重新处理')
     args = parser.parse_args()
 
     if not os.path.isdir(args.dir):
@@ -678,4 +772,4 @@ if __name__ == '__main__':
     if args.review:
         review_workflow(args.dir)
     else:
-        workflow(args.dir)
+        workflow(args.dir, load_progress=not args.no_progress)
