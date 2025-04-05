@@ -137,6 +137,7 @@ env.bak/
 venv.bak/
 google_account_key.json
 config/llm_config.json
+.vscode/
 
 # Spyder project settings
 .spyderproject
