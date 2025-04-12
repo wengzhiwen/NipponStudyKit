@@ -186,3 +186,6 @@ pdf_with_md*/
 pdf/
 output_*
 ref/
+log/
+output/
+blogs/
