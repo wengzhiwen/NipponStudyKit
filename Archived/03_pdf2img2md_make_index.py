@@ -41,7 +41,7 @@ class ServiceConfig:
             raise FileNotFoundError(f"LLM配置文件不存在: {self.llm_config_path}")
 
         # 加载LLM配置
-        self.llm_config = self.load_config("STD")
+        self.llm_config = self.load_config("MINI")
         self.llm_config_mini = self.load_config("LOW_COST")
 
     def load_config(self, model_tag: str = "STD") -> LLMConfig:
@@ -184,8 +184,8 @@ def translate_markdown(md_content: str) -> str:
 1. 保持原有的Markdown格式
 2. 翻译要准确、通顺，符合中文表达习惯
 3. 专业术语要准确翻译
-4. 不要添加任何额外的说明或注释
-5. 直接返回翻译结果，不需要其他解释
+4. 直接返回翻译结果，不需要其他解释
+5. 忠实翻译全文！不要有任何遗漏！
 
 请注意：
 - 不要在输出内容前后添加```markdown之类的标记，因为你的输出结果会直接被保存为.md文件
