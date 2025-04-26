@@ -2,13 +2,36 @@ import os
 import re
 import json
 from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import Tuple, Optional
 import sys
+import argparse
+from pathlib import Path
 
-from autogen import ConversableAgent
-from autogen.io.run_response import RunResponseProtocol
+from agents import Agent, Runner, trace
+from dotenv import load_dotenv
+from logging_config import setup_logger
 
-from service_config import ServiceConfig
+# 设置日志记录器
+logger = setup_logger(logger_name="blog_writer", log_level="INFO")
+
+
+class ServiceConfig:
+    """配置类，用于管理所有配置信息"""
+
+    def __init__(self):
+        load_dotenv()
+
+        # 加载模型配置
+        self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        self.model_mini = os.getenv("OPENAI_MODEL_MINI", "gpt-4o-mini")
+
+        # 检查配置信息
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.error("OPENAI_API_KEY 环境变量未设置")
+            raise ValueError("未设置OpenAI API密钥。请在.env文件中设置OPENAI_API_KEY环境变量。")
+
+        logger.info(f'SETUP INFO = MODEL: {self.model}, MODEL_MINI: {self.model_mini}')
 
 
 class UniversityUtils:
@@ -33,14 +56,13 @@ class UniversityUtils:
         for pdf_dir in self.pdf_dirs:
             # 获取一级子目录
             for subdir in os.listdir(pdf_dir):
-                subdir_path = os.path.join(pdf_dir, subdir)
-                if not os.path.isdir(subdir_path):
+                subdir_path = Path(pdf_dir) / subdir
+                if not subdir_path.is_dir():
                     continue
 
                 # 检查必需文件是否存在
                 required_files = [f"{subdir}.md", f"{subdir}_中文.md", f"{subdir}_report.md"]
-
-                is_valid = all(os.path.exists(os.path.join(subdir_path, f)) for f in required_files)
+                is_valid = all((subdir_path / f).exists() for f in required_files)
                 if not is_valid:
                     continue
 
@@ -63,7 +85,7 @@ class UniversityUtils:
 
                 # 如果大学已在字典中，比较日期
                 existing_path = self.university_list[univ_name]
-                existing_match = re.match(r".+_(\d{4}[-]?\d{2}[-]?\d{2}|\d{8})", os.path.basename(existing_path))
+                existing_match = re.match(r".+_(\d{4}[-]?\d{2}[-]?\d{2}|\d{8})", existing_path.name)
                 if not existing_match:
                     # 如果已存在的目录名不合法，直接用新的替代
                     self.university_list[univ_name] = subdir_path
@@ -96,7 +118,7 @@ class UniversityUtils:
             return None
 
         path = self.university_list[jp_name]
-        match = re.match(r".+_(\d{4}[-]?\d{2}[-]?\d{2}|\d{8})", os.path.basename(path))
+        match = re.match(r".+_(\d{4}[-]?\d{2}[-]?\d{2}|\d{8})", path.name)
         if not match:
             return None
 
@@ -128,8 +150,8 @@ class UniversityUtils:
 
 class ArticleWriter:
 
-    LOG_DIR = "log"
-    OUTPUT_DIR = "blogs"
+    LOG_DIR = Path("log")
+    OUTPUT_DIR = Path("blogs")
 
     def __init__(self):
         # 初始化配置
@@ -138,15 +160,15 @@ class ArticleWriter:
         self.university_utils = UniversityUtils()
         self._init_workspace()
 
-        self.article_writer: Optional[ConversableAgent] = None
-        self.blog_formatter: Optional[ConversableAgent] = None
+        self.article_writer: Optional[Agent] = None
+        self.blog_formatter: Optional[Agent] = None
 
     def _init_agents(self):
         """初始化agents"""
-        self.article_writer = ConversableAgent(name="article_writer",
-                                               llm_config=self.config.llm_config_low_cost,
-                                               description="Agent for writing professional articles about studying in Japan",
-                                               system_message="""你是一位专业的日本留学相关的文章的写作优化专家。
+        # 创建文章写作代理
+        self.article_writer = Agent(name="article_writer",
+                                   model=self.config.model,
+                                   instructions="""你是一位专业的日本留学相关的文章的写作优化专家。
 你的工作是：
 1、根据用户输入的参考内容，重新进行组织和优化，使得文章内容更加轻松、易读
 2、必要时根据你所掌握的日本留学相关的准确知识进行适当的补充
@@ -154,6 +176,7 @@ class ArticleWriter:
 4、只有用户输入的参考内容中提到的大学，你才可以在输出中提及
 5、记录下在你输出中提到的大学中文名称（全名）列表（大学中文全名、大学日文全名）
 6、在文章的末尾添加一个"相关大学"的标题，列出上表中的中文全名
+7、表格是很好的信息组织方式，如果需要，可以使用markdown的语法来表示表格
 
 请以JSON格式返回结果，格式如下：
 {
@@ -174,12 +197,13 @@ class ArticleWriter:
  - 不要在返回中带有```json 或是 ``` 这样的定界符
 """)
 
-        self.blog_formatter = ConversableAgent(name="blog_formatter",
-                                               llm_config=self.config.llm_config_mini,
-                                               description="Agent for formatting articles",
-                                               system_message="""你是一位专业的日本留学相关的文章的格式化专家。
+        # 创建文章格式化代理
+        self.blog_formatter = Agent(name="blog_formatter",
+                                   model=self.config.model,
+                                   instructions="""你是一位专业的日本留学相关的文章的格式化专家。
 你的工作是将输入的文章内容进行markdown格式化：
 1、将文章内容进行markdown格式化，注意正确的使用H1～H4的标题以及加粗等markdown语法
+2、表格的排版要特别注意，保证表格的完整性
 
 
 请以JSON格式返回结果，格式如下：
@@ -190,14 +214,20 @@ class ArticleWriter:
 注意：
 - 你的工作只是进行格式化，除非有明显的中文语法错误，不要对文章内容进行任何的修改
 - 返回的formatted_content不应该带有任何 ```json 或是 ``` 或是 ```markdown 这样的标记
+
+关于Markdown的语法格式，特别注意以下要求：
+1. 表格前后的空行要保留
+2. 列表前后的空行要保留
+3. 标题前后的空行要保留
+4. 表格的排版（特别是合并单元格）要与原文（图片）完全一致
+5. 根据Markdown的语法，需要添加空格的地方，请务必添加空格；但不要在表格的单元格内填充大量的空格，需要的话填充一个空格即可
+总之，要严格的践行Markdown的语法要求，不要只是看上去像，其实有不少语法错误
 """)
 
     def _init_workspace(self):
         """初始化工作目录"""
-        if not os.path.exists(self.OUTPUT_DIR):
-            os.makedirs(self.OUTPUT_DIR)
-        if not os.path.exists(self.LOG_DIR):
-            os.makedirs(self.LOG_DIR)
+        self.OUTPUT_DIR.mkdir(exist_ok=True)
+        self.LOG_DIR.mkdir(exist_ok=True)
 
     def write_article(self, sample_md_content: str, sample_md_file_name: str = "") -> Tuple[Optional[str], Optional[str]]:
         """根据写作方向和参考内容生成文章"""
@@ -209,23 +239,28 @@ class ArticleWriter:
         """
 
         # 使用标准输出文件记录对话过程
-        std_output_file = f"ag2_std_output_{sample_md_file_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
-        std_output_file = os.path.join(self.LOG_DIR, std_output_file)
+        std_output_file = self.LOG_DIR / f"ag2_std_output_{sample_md_file_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
 
         sys.stdout = open(std_output_file, "w", encoding="utf-8")
         try:
             self._init_agents()
 
             # 第一步：生成文章内容
-            response: RunResponseProtocol = self.article_writer.run(message=task, user_input=False, summary_method="last_msg", max_turns=1)
-            response.process()
-            if not response or not response.summary:
-                raise Exception("文章生成失败")
+            with trace("文章生成"):
+                input_items = [
+                    {
+                        "role": "user",
+                        "content": task
+                    }
+                ]
+                result = Runner.run_sync(self.article_writer, input_items)
+                if not result or not result.final_output:
+                    raise Exception("文章生成失败")
 
-            try:
-                article_data = json.loads(response.summary)
-            except json.JSONDecodeError as e:
-                raise Exception(f"文章生成结果格式错误: {e}") from e
+                try:
+                    article_data = json.loads(result.final_output)
+                except json.JSONDecodeError as e:
+                    raise Exception(f"文章生成结果格式错误: {e}") from e
 
             # 为大学添加URL
             valid_universities = []
@@ -237,22 +272,26 @@ class ArticleWriter:
                         valid_universities.append(university)
 
             # 第二步：格式化文章
-            format_task = f"""请格式化以下文章：
-            
+            with trace("文章格式化"):
+                format_input_items = [
+                    {
+                        "role": "user",
+                        "content": f"""请格式化以下文章：
+                        
 {article_data["content"]}
 """
+                    }
+                ]
+                format_result = Runner.run_sync(self.blog_formatter, format_input_items)
+                if not format_result or not format_result.final_output:
+                    raise Exception("文章格式化失败")
 
-            format_response: RunResponseProtocol = self.blog_formatter.run(message=format_task, user_input=False, summary_method="last_msg", max_turns=1)
-            format_response.process()
-            if not format_response or not format_response.summary:
-                raise Exception("文章格式化失败")
+                try:
+                    format_data = json.loads(format_result.final_output)
+                except json.JSONDecodeError as e:
+                    raise Exception(f"文章格式化结果格式错误: {e}") from e
 
-            try:
-                format_data = json.loads(format_response.summary)
-            except json.JSONDecodeError as e:
-                raise Exception(f"文章格式化结果格式错误: {e}") from e
-
-            formatted_content = format_data["formatted_content"]
+                formatted_content = format_data["formatted_content"]
 
             # 添加大学URL
             for university in valid_universities:
@@ -261,7 +300,7 @@ class ArticleWriter:
             return article_data["title"], formatted_content
 
         except Exception as e:
-            print(f"生成文章时发生错误: {e}")
+            logger.error(f"生成文章时发生错误: {e}")
             return None, None
         finally:
             sys.stdout.close()
@@ -272,21 +311,21 @@ class ArticleWriter:
         try:
             title, formatted_content = self.write_article(sample_md_content, sample_md_file_name)
         except Exception as e:
-            print(f"生成文章时发生错误: {e}")
+            logger.error(f"生成文章时发生错误: {e}")
             return None
 
         if title is None or len(title) == 0:
-            print("未能生成文章的标题，pass")
+            logger.warning("未能生成文章的标题，pass")
             return None
 
         if formatted_content is None or len(formatted_content) == 0:
-            print(f"未能生成文章的内容，pass: {title}")
+            logger.warning(f"未能生成文章的内容，pass: {title}")
             return None
 
-        print(f"开始输出：{title}")
+        logger.info(f"开始输出：{title}")
 
         # 创建一个以 title_当前时间.md 为名的文件
-        output_file = os.path.join(self.OUTPUT_DIR, f"{title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.md")
+        output_file = self.OUTPUT_DIR / f"{title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.md"
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(formatted_content)
@@ -294,28 +333,86 @@ class ArticleWriter:
         return "Success"
 
 
-def main():
-    md_file_count = 0
-    success_count = 0
+def main(input_folder_path: Path) -> None:
+    """主函数，协调整个文章生成过程
+    
+    Args:
+        input_folder_path (Path): 要处理的文件夹路径
+    """
+    try:
+        # 创建服务实例
+        writer = ArticleWriter()
 
-    sample_dir = "output"
-    # 从sample_dir中读取所有md文件
-    for md_file in os.listdir(sample_dir):
-        if md_file.endswith(".md"):
-            print(f"开始处理: {md_file}")
+        # 处理所有文件
+        md_file_count = 0
+        success_count = 0
+
+        # 从input_folder_path中读取所有md文件
+        for md_file in input_folder_path.glob("*.md"):
+            logger.info(f"开始处理: {md_file.name}")
             md_file_count += 1
-            with open(os.path.join(sample_dir, md_file), "r", encoding="utf-8") as f:
+            with open(md_file, "r", encoding="utf-8") as f:
                 content = f.read()
-            writer = ArticleWriter()
-            result = writer.process_one(content, md_file)
+            result = writer.process_one(content, md_file.name)
             if result is None:
-                print(f"处理失败: {md_file}")
+                logger.error(f"处理失败: {md_file.name}")
             else:
-                print(f"处理成功: {md_file}")
+                logger.info(f"处理成功: {md_file.name}")
                 success_count += 1
 
-    print(f"总共处理了{md_file_count}个文件，成功了{success_count}个")
+        # 汇总处理结果
+        if success_count < md_file_count:
+            logger.warning(f"处理完成：共 {md_file_count} 个文件，成功 {success_count} 个，失败 {md_file_count - success_count} 个")
+        else:
+            logger.info(f"处理完成：全部 {md_file_count} 个文件处理成功")
+
+    except ValueError as e:
+        # 处理已知的配置和初始化错误
+        logger.error(f"程序初始化失败: {e}")
+        sys.exit(1)
+    except Exception as e:
+        # 处理未预期的运行时错误
+        logger.error(f"程序运行过程中发生未预期的错误: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='日本留学文章生成')
+    parser.add_argument('input_folder', nargs='?', default="output", help='保存文章源文件的文件夹。如果不指定，将使用默认值：output')
+    args = parser.parse_args()
+
+    try:
+        input_folder = Path(args.input_folder)
+    except Exception as e:
+        logger.error(f'输入路径不合法：{args.input_folder} - {str(e)}')
+        print('Usage: python blog_writer.py <input_folder>')
+        sys.exit(1)
+
+    if not input_folder.exists():
+        logger.error(f'指定的文件夹不存在：{input_folder}')
+        print('Usage: python blog_writer.py <input_folder>')
+        sys.exit(1)
+
+    if not input_folder.is_dir():
+        logger.error(f'指定的路径不是一个文件夹：{input_folder}')
+        print('Usage: python blog_writer.py <input_folder>')
+        sys.exit(1)
+
+    try:
+        # 检查文件夹是否可读
+        if not os.access(input_folder, os.R_OK):
+            logger.error(f'没有权限读取指定的文件夹：{input_folder}')
+            print('Usage: python blog_writer.py <input_folder>')
+            sys.exit(1)
+
+        # 检查文件夹是否为空
+        if not any(input_folder.glob("*.md")):
+            logger.error(f'指定的文件夹中没有找到任何.md文件：{input_folder}')
+            print('Usage: python blog_writer.py <input_folder>')
+            sys.exit(1)
+
+        logger.info(f"开始处理：{input_folder}")
+        main(input_folder)
+    except Exception as e:
+        logger.error(f'处理过程中发生错误：{str(e)}')
+        sys.exit(1)
