@@ -54,9 +54,19 @@ class MDAnalysisTools:
 
 
 class ServiceConfig:
-    """配置类，用于管理所有配置信息"""
+    """配置类，用于管理所有配置信息（单例模式）"""
+    _instance = None
+    _initialized = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(ServiceConfig, cls).__new__(cls)
+        return cls._instance
 
     def __init__(self):
+        if self._initialized:
+            return
+
         load_dotenv()
 
         # 加载模型配置
@@ -69,7 +79,18 @@ class ServiceConfig:
             logger.error("OPENAI_API_KEY 环境变量未设置")
             raise ValueError("未设置OpenAI API密钥。请在.env文件中设置OPENAI_API_KEY环境变量。")
 
+        # 检查并加载翻译术语文件
+        translate_terms_file = 'translate_terms.txt'
+        if not os.path.exists(translate_terms_file):
+            raise ValueError(f"错误：翻译术语文件 {translate_terms_file} 不存在")
+
+        with open(translate_terms_file, 'r', encoding='utf-8') as f:
+            self.translate_terms = f.read().strip()
+            if not self.translate_terms:
+                raise ValueError(f"错误：翻译术语文件 {translate_terms_file} 为空")
+
         logger.info(f'SETUP INFO = MODEL: {self.model}, MODEL_MINI: {self.model_mini}')
+        self._initialized = True
 
 
 class MDAnalysisService:
@@ -128,12 +149,15 @@ class MDAnalysisService:
  - 不要进行寒暄，直接开始工作
  - 不要在回答中包含任何额外的信息，只需要直接开始回答问题即可
  - 每一个问题都要回答，如果信息不确定，就明确指出"无法确定"，不要跳过任何问题
- - 所有的问题都请针对'打算报考学部（本科）的外国人留学生'的状况来回答，不要将其他招生对象的情况包含进来""")
+ - 所有的问题都请针对'打算报考学部（本科）的外国人留学生'的状况来回答，不要将其他招生对象的情况包含进来
+
+{self.config.translate_terms}
+""")
 
         # 创建审核代理
         self.review_agent = Agent(name="Review_Agent",
                                   model=self.config.model,
-                                  instructions="""你是一位严谨的校对人员,你根据用户输入的Markdown原文对用户输入的分析结果进行校对。
+                                  instructions=f"""你是一位严谨的校对人员,你根据用户输入的Markdown原文对用户输入的分析结果进行校对。
 你的工作流程如下：
 0. Markdown原文可能很长，因为有些Markdown包含了大量和留学生入学无关的信息，可以先将这部分信息排除再进行分析
 1. 逐一核对,针对其中不相符的情况直接对分析结果进行修正。
@@ -146,7 +170,10 @@ class MDAnalysisService:
  - 并不是要你重新回答问题，而是要你根据原始文档来校对分析结果
  - 用户需要的是完整的分析结果，不要仅仅提供原文的引用
  - 不要进行寒暄，直接开始工作。
- - 所有的问题都是针对'打算报考学部（本科）的外国人留学生'的状况来回答的，请不要将其他招生对象的情况包含进来""")
+ - 所有的问题都是针对'打算报考学部（本科）的外国人留学生'的状况来回答的，请不要将其他招生对象的情况包含进来
+
+{self.config.translate_terms}
+""")
 
         # 创建报告生成代理
         self.report_agent = Agent(name="Report_Agent",

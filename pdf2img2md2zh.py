@@ -58,6 +58,16 @@ class Config:
             logger.warning("DPI配置无效，使用默认值150")
             self.dpi = 150
 
+        # 检查并加载翻译术语文件
+        translate_terms_file = 'translate_terms.txt'
+        if not os.path.exists(translate_terms_file):
+            raise ValueError(f"错误：翻译术语文件 {translate_terms_file} 不存在")
+
+        with open(translate_terms_file, 'r', encoding='utf-8') as f:
+            self.translate_terms = f.read().strip()
+            if not self.translate_terms:
+                raise ValueError(f"错误：翻译术语文件 {translate_terms_file} 为空")
+
         logger.info(f'SETUP INFO = DPI: {self.dpi}, OCR_MODEL: {self.ocr_model}, MODEL: {self.model}')
         self._initialized = True
 
@@ -217,8 +227,9 @@ def translate_markdown(md_content):
     logger.info("翻译Markdown内容为中文...")
 
     # 创建翻译代理
+    config = Config()
     translator_agent = Agent(name="Translator",
-                             instructions="""你是一位专业的日语翻译专家，擅长将日语文本翻译成中文。
+                             instructions=f"""你是一位专业的日语翻译专家，擅长将日语文本翻译成中文。
 请将用户输入的日语Markdown文本翻译成中文，要求：
 1. 保持原有的Markdown格式，标题、列表、表格、段落等格式要与原文完全一致
 2. 翻译要准确、通顺，符合中文表达习惯
@@ -231,21 +242,9 @@ def translate_markdown(md_content):
 8. 所有第三方考试的名称，比如：EJU，TOEFL，TOEIC，等，使用统一的英语缩写来翻译。
 9. 完整翻译全文，不要遗漏任何内容，不要添加任何解释或说明也不要进行归纳总结
 
-部分专业术语（尽可能使用以下的中文来表达对应的日语含义，主要为了符合留学生的表达习惯）：
-- 招生简章：募集要項
-- 报名截止日：報名締め切り日
-- 自费留学生：私費留学生
-- 目录：目次
-- 学部：学部
-- 学科：学科
-- 专攻：コース・専攻
-- 出愿：出願
-- 文件：資料・書類
-- 校区：キャンパス
-- 入学金：入学金
-- 学费：授業料
+{config.translate_terms}
 """,
-                             model=Config().model)
+                             model=config.model)
     input_items = [{"role": "user", "content": f"""请将以下日语Markdown文本翻译成中文：
 
 {md_content}
@@ -332,6 +331,8 @@ def process_single_pdf(pdf_path, output_base_folder, resume_dir=None):
         if not os.path.exists(os.path.join(output_folder, os.path.basename(pdf_path))) and not resume_dir:
             logger.info(f'移动PDF文件: {pdf_path} -> {output_folder}')
             shutil.move(pdf_path, output_folder)
+    
+        pdf_path = os.path.join(output_folder, os.path.basename(pdf_path))
 
         # 在恢复模式下，检查是否需要重新进行PDF转图片
         log_file = os.path.join(output_folder, 'pdf2md.log')
