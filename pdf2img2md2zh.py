@@ -328,9 +328,10 @@ def process_single_pdf(pdf_path, output_base_folder, resume_dir=None):
         output_folder = os.path.join(output_base_folder, base_name)
         os.makedirs(output_folder, exist_ok=True)
 
-        # 如果尚未完成，复制原始PDF
+        # 在非恢复模式下，移动原始PDF到输出目录
         if not os.path.exists(os.path.join(output_folder, os.path.basename(pdf_path))) and not resume_dir:
-            shutil.copy2(pdf_path, output_folder)
+            logger.info(f'移动PDF文件: {pdf_path} -> {output_folder}')
+            shutil.move(pdf_path, output_folder)
 
         # 在恢复模式下，检查是否需要重新进行PDF转图片
         log_file = os.path.join(output_folder, 'pdf2md.log')
