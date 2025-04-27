@@ -95,6 +95,8 @@ class MDAnalysisService:
             logger.error(f"读取md_analysis_questions.txt文件时发生错误: {e}")
             raise ValueError(f"读取分析问题文件时发生问题: {e}") from e
 
+        logger.debug(f"准备针对文档对以下问题进行分析: \n{self.questions}")
+
         # 初始化代理
         self._init_agents()
 
@@ -103,7 +105,7 @@ class MDAnalysisService:
         # 创建分析代理
         self.markdown_analyzer_agent = Agent(name="Markdown_Analyzer_Agent",
                                              model=self.config.model,
-                                             instructions="""你是一位严谨的日本留学信息专家,你根据用户最初输入的完整Markdown内容继续以下工作流：
+                                             instructions=f"""你是一位严谨的日本留学信息专家,你根据用户最初输入的完整Markdown内容继续以下工作流：
 0. Markdown原文可能很长，因为有些Markdown包含了大量和留学生入学无关的信息，可以先将这部分信息排除再进行分析
  - 但是要注意，有些学校可能不会直接使用'外国人留学生'这样的说法，但他们事实上招收留学生，如：
    - 允许没有日本国籍的人报名
@@ -117,6 +119,9 @@ class MDAnalysisService:
     - 请严格按照文档来回答问题，不要进行任何额外的推测或猜测！
 2. 分析报告包含每个问题以及对应的回答，请严格按照问题顺序依次回答。
 3. 请仅将你的分析结果的正文直接返回，不要带有任何的说明性文字。
+
+你要回答的问题是：
+{self.questions}
 
 请注意：
  - 用户需要的是完整的分析结果，不要仅仅提供原文的引用
@@ -261,9 +266,7 @@ class MDAnalysisService:
 
             # 3. 构建初始提示
             logger.debug(f"文件大小: {len(md_content)} 字符")
-            initial_prompt = f"""请分析以下日本大学招生信息Markdown文档内容：
-
-问题列表:
+            initial_prompt = f"""请根据接下来提供的日本大学招生信息Markdown文档内容，对以下问题进行分析：
 {self.questions}
 
 请完成以下三个步骤:
@@ -271,7 +274,7 @@ class MDAnalysisService:
 2. 使用review_analysis工具对分析结果进行审核校对
 3. 使用generate_report工具生成最终Markdown格式报告
 
-文档内容:
+以下是要被分析的文档内容:
 {md_content}
 """
 
