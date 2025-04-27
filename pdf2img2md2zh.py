@@ -130,22 +130,17 @@ def perform_ocr(image_path):
         # 编码图像为base64
         base64_image = base64.b64encode(image_data).decode('utf-8')
 
-        # 按照llm_as_a_judge.py的示例优化输入格式
-        input_items: list[TResponseInputItem] = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": "请识别这个图像中的所有文字内容，保持原始格式。"
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:image/png;base64,{base64_image}"
-                    }
-                ]
-            }
-        ]
+        input_items: list[TResponseInputItem] = [{
+            "role":
+            "user",
+            "content": [{
+                "type": "input_text",
+                "text": "请识别这个图像中的所有文字内容，保持原始格式。"
+            }, {
+                "type": "input_image",
+                "image_url": f"data:image/png;base64,{base64_image}"
+            }]
+        }]
 
         # 运行OCR代理
         result = Runner.run_sync(ocr_agent, input_items)
@@ -199,22 +194,17 @@ def format_to_markdown(text_content, image_path):
     # 编码图像为base64
     base64_image = base64.b64encode(image_data).decode('utf-8')
 
-    # 按照llm_as_a_judge.py的示例优化输入格式
-    input_items = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": f"请将以下OCR文本重新组织成Markdown格式：\n\n{text_content} \n\n-----------\n\n务必尊从系统提示词中的要求来进行格式化。"
-                },
-                {
-                    "type": "input_image",
-                    "image_url": f"data:image/png;base64,{base64_image}"
-                }
-            ]
-        }
-    ]
+    input_items = [{
+        "role":
+        "user",
+        "content": [{
+            "type": "input_text",
+            "text": f"请将以下OCR文本重新组织成Markdown格式：\n\n{text_content} \n\n-----------\n\n务必尊从系统提示词中的要求来进行格式化。"
+        }, {
+            "type": "input_image",
+            "image_url": f"data:image/png;base64,{base64_image}"
+        }]
+    }]
 
     # 运行格式化代理
     result = Runner.run_sync(format_agent, input_items)
@@ -256,20 +246,13 @@ def translate_markdown(md_content):
 - 学费：授業料
 """,
                              model=Config().model)
-
-    # 按照llm_as_a_judge.py的示例优化输入格式
-    input_items = [
-        {
-            "role": "user",
-            "content": f"""请将以下日语Markdown文本翻译成中文：
+    input_items = [{"role": "user", "content": f"""请将以下日语Markdown文本翻译成中文：
 
 {md_content}
 
 -----------
 
-请直接返回翻译结果。务必尊从系统提示词中的要求来进行翻译。"""
-        }
-    ]
+请直接返回翻译结果。务必尊从系统提示词中的要求来进行翻译。"""}]
 
     # 运行翻译代理
     result = Runner.run_sync(translator_agent, input_items)
@@ -294,13 +277,7 @@ def analyze_admission_info(md_content):
 """,
                           model=Config().model)
 
-    # 按照llm_as_a_judge.py的示例优化输入格式
-    input_items = [
-        {
-            "role": "user",
-            "content": md_content + "\n\n请确保返回的是合法的JSON格式，不要包含任何其他说明文字。"
-        }
-    ]
+    input_items = [{"role": "user", "content": md_content + "\n\n请确保返回的是合法的JSON格式，不要包含任何其他说明文字。"}]
 
     # 运行分析代理
     result = Runner.run_sync(analyze_agent, input_items)
@@ -409,7 +386,7 @@ def process_single_pdf(pdf_path, output_base_folder, resume_dir=None):
                         logger.error(f"OCR失败: {img_name}")
                         ocr_error_count += 1
                         continue  # 跳过此图像的后续处理
-                    
+
                     markdown_output = format_to_markdown(text_content, img)
 
                     if markdown_output:
@@ -433,7 +410,7 @@ def process_single_pdf(pdf_path, output_base_folder, resume_dir=None):
             new_folder_path = os.path.join(output_base_folder, new_folder_name)
             os.rename(output_folder, new_folder_path)
             return False
-            
+
         # 如果md_content为空，跳过后续处理
         if not md_content.strip():
             logger.warning(f"没有有效的Markdown内容，跳过后续处理: {pdf_path}")
