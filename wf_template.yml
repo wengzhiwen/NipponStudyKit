@@ -2,25 +2,25 @@ workflow:
   works:
     - name: "01_pdf2img"
       status: not_started
-      output_file: "scan_0.png"
+      index: 1
       comment: "Convert pdf to png page by page"
     
     - name: "02_ocr"
       status: not_started
-      output_file: "FOLDER_NAME.md"
+      index: 2
       comment: "OCR every png to markdown, and combine them into one markdown file"
     
     - name: "03_translate"
       status: not_started
-      output_file: "FOLDER_NAME_中文.md"
+      index: 3
       comment: "Translate the markdown to Chinese"
     
     - name: "04_analysis"
       status: not_started
-      output_file: "FOLDER_NAME_report.md"
+      index: 4
       comment: "Analyze the markdown file and generate a report markdown file" 
 
     - name: "05_output"
       status: not_started
-      output_file: "review.csv"
+      index: 5
       comment: "Review the markdown file and output the all files" 

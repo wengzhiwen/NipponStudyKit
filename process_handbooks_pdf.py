@@ -44,10 +44,71 @@ class Config:
 
         self._initialized = True
 
+def create_buffalo_project(pdf_path) -> Project:
+    config = Config()
+    buffalo = Buffalo(base_dir=config.base_dir, template_path=config.buffalo_template_file)
 
-def workflow(pdf_folder):
+    # 以pdf的basename的前5位加日期时间作为buffalo project的name
+    project_folder_name = os.path.basename(pdf_path)[:5] + datetime.now().strftime('%Y%m%d_%H%M%S')
+    project: Project = buffalo.create_project(project_folder_name)
+
+    project.move_to_project(Path(pdf_path), "handbook.pdf")
+
+    return project
+
+def pdf2img(project: Project, work: Work):
+    logger.info(f'{project.folder_name} - {work.name} 开始处理')
+    work.set_status(Work.DONE)
+    project.save_project()
+
+def ocr(project: Project, work: Work):
+    logger.info(f'{project.folder_name} - {work.name} 开始处理')
+    work.set_status(Work.DONE)
+    project.save_project()
+
+def translate(project: Project, work: Work):
+    logger.info(f'{project.folder_name} - {work.name} 开始处理')
+    work.set_status(Work.DONE)
+    project.save_project()
+
+def analysis(project: Project, work: Work):
+    logger.info(f'{project.folder_name} - {work.name} 开始处理')
+    work.set_status(Work.DONE)
+    project.save_project()
+
+def output(project: Project, work: Work):
+    logger.info(f'{project.folder_name} - {work.name} 开始处理')
+    work.set_status(Work.DONE)
+    project.save_project()
+
+workers = {
+    "01_pdf2img": pdf2img,
+    "02_ocr": ocr,
+    "03_translate": translate,
+    "04_analysis": analysis,
+    "05_output": output,
+}
+
+def factory_start():
     config = Config()
 
+    for work_name, worker in workers.items():
+        while True:
+            buffalo = Buffalo(base_dir=config.base_dir, template_path=config.buffalo_template_file)
+            project: Project
+            work: Work
+            project, work = buffalo.get_a_job(work_name)
+            if project is None or work is None:
+                break
+            try:
+                worker(project, work)
+            except Exception as e:
+                logger.error(f'{project.folder_name} - {work.name} 处理失败，错误信息: {e}')
+                continue
+            finally:
+                time.sleep(1)
+
+def workflow(pdf_folder):
     # 获取所有PDF文件
     pdf_files = glob.glob(os.path.join(pdf_folder, '*.pdf'))
     total_pdfs = len(pdf_files)
@@ -59,26 +120,18 @@ def workflow(pdf_folder):
         logger.info(f'\n处理 {os.path.basename(pdf_path)}...')
 
         try:
-            buffalo = Buffalo(base_dir=config.base_dir, template_path=config.buffalo_template_file)
-
-            # 以pdf的basename的前5位加日期时间作为buffalo project的name
-            project_folder_name = os.path.basename(pdf_path)[:5] + datetime.now().strftime('%Y%m%d_%H%M%S')
-            project: Project = buffalo.create_project(project_folder_name)
-
-            project.move_to_project(Path(pdf_path), "handbook.pdf")
-
-            created_buffalo_projects += 1
+            _ = create_buffalo_project(pdf_path)
 
             logger.info(f'进度: {created_buffalo_projects}/{total_pdfs} 已创建buffalo项目')
         except Exception as e:
             logger.error(f'错误: 创建buffalo项目失败，错误信息: {e}')
             continue
         finally:
-            # 等待1秒
             time.sleep(1)
 
-    logger.info('\n处理完成:')
     logger.info(f'总共创建的buffalo项目数: {created_buffalo_projects}')
+
+    factory_start()
 
 
 if __name__ == '__main__':
