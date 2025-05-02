@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from logging_config import setup_logger
 from buffalo import Buffalo, Work, Project
+from pdf2image import convert_from_path
+
+from logging_config import setup_logger
 
 logger = setup_logger(logger_name="ProcessHandbooksPDF", log_level="INFO")
 
@@ -42,7 +44,14 @@ class Config:
         except Exception as e:
             raise FileNotFoundError(f"Buffalo template file not found: {self.buffalo_template_file}") from e
 
+        try:
+            # pylint: disable=invalid-envvar-default
+            self.ocr_dpi = int(os.getenv("OCR_DPI", 150))
+        except Exception:
+            self.ocr_dpi = 150
+
         self._initialized = True
+
 
 def create_buffalo_project(pdf_path) -> Project:
     config = Config()
@@ -56,30 +65,67 @@ def create_buffalo_project(pdf_path) -> Project:
 
     return project
 
-def pdf2img(project: Project, work: Work):
+
+def pdf2img(project: Project, work: Work, config: Config):
+    logger.info(f'{project.folder_name} - {work.name} 开始处理')
+    work.set_status(Work.IN_PROGRESS)
+    project.save_project()
+
+    # 最大重试次数
+    retry_limit = 1
+
+    while True:
+        try:
+            pdf_path = project.project_path / "handbook.pdf"
+            if not pdf_path.exists():
+                logger.error(f'{project.folder_name} - handbook.pdf 文件不存在')
+                # retry is not necessary, not change status
+                return
+
+            images = convert_from_path(pdf_path, dpi=config.ocr_dpi)
+
+            for i, image in enumerate(images):
+                image.save(project.project_path / f'scan_{i}.png', 'PNG')
+
+            work.set_status(Work.DONE)
+            project.save_project()
+            logger.info(f'{project.folder_name} - {work.name} 处理完成，共生成 {len(images)} 张图片')
+            return
+
+        except Exception as e:
+            logger.error(f'{project.folder_name} - {work.name} 处理失败: {str(e)}')
+            if retry_limit > 0:
+                retry_limit -= 1
+                continue
+            else:
+                logger.error(f'{project.folder_name} - {work.name} 处理失败，超过重试次数限制，放弃')
+                # over retry limit, not change status
+                return
+
+
+def ocr(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
     work.set_status(Work.DONE)
     project.save_project()
 
-def ocr(project: Project, work: Work):
+
+def translate(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
     work.set_status(Work.DONE)
     project.save_project()
 
-def translate(project: Project, work: Work):
+
+def analysis(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
     work.set_status(Work.DONE)
     project.save_project()
 
-def analysis(project: Project, work: Work):
+
+def output(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
     work.set_status(Work.DONE)
     project.save_project()
 
-def output(project: Project, work: Work):
-    logger.info(f'{project.folder_name} - {work.name} 开始处理')
-    work.set_status(Work.DONE)
-    project.save_project()
 
 workers = {
     "01_pdf2img": pdf2img,
@@ -89,24 +135,27 @@ workers = {
     "05_output": output,
 }
 
+
 def factory_start():
     config = Config()
 
-    for work_name, worker in workers.items():
-        while True:
-            buffalo = Buffalo(base_dir=config.base_dir, template_path=config.buffalo_template_file)
-            project: Project
-            work: Work
-            project, work = buffalo.get_a_job(work_name)
-            if project is None or work is None:
-                break
-            try:
-                worker(project, work)
-            except Exception as e:
-                logger.error(f'{project.folder_name} - {work.name} 处理失败，错误信息: {e}')
-                continue
-            finally:
-                time.sleep(1)
+    while True:
+        buffalo = Buffalo(base_dir=config.base_dir, template_path=config.buffalo_template_file)
+        project: Project
+        work: Work
+        project, work = buffalo.get_a_job()
+        if project is None or work is None:
+            break
+
+        worker = workers[work.name]
+        try:
+            worker(project, work, config)
+        except Exception as e:
+            logger.error(f'{project.folder_name} - {work.name} 处理失败，错误信息: {e}')
+            continue
+        finally:
+            time.sleep(1)
+
 
 def workflow(pdf_folder):
     # 获取所有PDF文件
@@ -122,6 +171,7 @@ def workflow(pdf_folder):
         try:
             _ = create_buffalo_project(pdf_path)
 
+            created_buffalo_projects += 1
             logger.info(f'进度: {created_buffalo_projects}/{total_pdfs} 已创建buffalo项目')
         except Exception as e:
             logger.error(f'错误: 创建buffalo项目失败，错误信息: {e}')
