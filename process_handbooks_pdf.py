@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from buffalo import Buffalo, Work, Project
 from pdf2image import convert_from_path
 from ocr_tool import OCRTool
+from translate_tool import TranslateTool
 
 from logging_config import setup_logger
 
@@ -55,6 +56,22 @@ class Config:
             self.ocr_model_name = os.getenv("OCR_MODEL_NAME", "gpt-4o-mini")
         except Exception:
             self.ocr_model_name = "gpt-4o-mini"
+
+        try:
+            translate_terms_file = os.getenv("TRANSLATE_TERMS_FILE", "")
+            if not translate_terms_file:
+                raise ValueError("TRANSLATE_TERMS_FILE 环境变量未设置")
+            if not Path(translate_terms_file).exists():
+                raise FileNotFoundError(f"TRANSLATE_TERMS_FILE 文件不存在: {translate_terms_file}")
+            with open(translate_terms_file, 'r', encoding='utf-8') as f:
+                self.translate_terms = f.read()
+        except Exception:
+            self.translate_terms = ""
+
+        try:
+            self.translate_model_name = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
+        except Exception:
+            self.translate_model_name = "gpt-4o-mini"
 
         self._initialized = True
 
@@ -144,7 +161,7 @@ def ocr(project: Project, work: Work, config: Config):
                 except Exception as e:
                     logger.error(f'{img_path.name} 对应的md文件 {img_path.stem}.md 虽然存在但读取失败: {str(e)}，从这里开始OCR')
 
-            logger.info(f'开始处理图片: {img_path.name}')
+            logger.info(f'开始使用 {config.ocr_model_name} 处理图片: {img_path.name}')
 
             # 将图片转换为markdown，比较容易因为波动等原因发生失败，提供1次重试的机会
             retry_limit = 1
@@ -198,8 +215,55 @@ def ocr(project: Project, work: Work, config: Config):
 
 def translate(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
-    work.set_status(Work.DONE)
+    work.set_status(Work.IN_PROGRESS)
     project.save_project()
+
+    try:
+        # 读取handbook.md文件
+        md_path = project.project_path / 'handbook.md'
+        if not md_path.exists():
+            raise FileNotFoundError(f'{project.folder_name} - handbook.md 文件不存在')
+
+        with open(md_path, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+
+        if not md_content.strip():
+            raise ValueError(f'{project.folder_name} - markdown文件内容为空')
+
+        translate_tool = TranslateTool(config.translate_model_name, config.translate_terms)
+        logger.info(f'开始使用 {config.translate_model_name} 执行翻译')
+
+        # 翻译md内容，比较容易因为波动等原因发生失败，提供1次重试的机会
+        retry_limit = 1
+        while True:
+            try:
+                zh_content = translate_tool.md2zh(md_content)
+                break
+            except Exception as e:
+                logger.error(f'{project.folder_name} - 翻译失败: {str(e)}')
+                if retry_limit > 0:
+                    retry_limit -= 1
+                    time.sleep(10)
+                    continue
+                else:
+                    raise Exception(f'{project.folder_name} - 翻译失败，超过重试次数限制，放弃') from e
+
+        if not zh_content:
+            raise ValueError(f'{project.folder_name} - 翻译失败')
+
+        # 保存翻译结果
+        zh_md_path = project.project_path / 'handbook_zh.md'
+        with open(zh_md_path, 'w', encoding='utf-8') as f:
+            f.write(zh_content)
+
+        work.set_status(Work.DONE)
+        project.save_project()
+
+    except Exception as e:
+        logger.error(f'{project.folder_name} - {work.name} 处理失败: {str(e)}')
+        # do not change status
+        # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
+        return
 
 
 def analysis(project: Project, work: Work, config: Config):
@@ -226,23 +290,39 @@ workers = {
 def factory_start():
     config = Config()
 
+    job_count = 0
+    success_count = 0
+    failed_count = 0
+
     while True:
         buffalo = Buffalo(base_dir=config.base_dir, template_path=config.buffalo_template_file)
         project: Project
         work: Work
         project, work = buffalo.get_a_job()
         if project is None or work is None:
+            # 没有任务了，退出
             break
 
+        job_count += 1
         worker = workers[work.name]
         try:
             worker(project, work, config)
+            if work.status == Work.NOT_STARTED:
+                logger.info(f'{project.folder_name} - {work.name} 未能正确处理，将会自动重试...')
+            if work.status == Work.IN_PROGRESS:
+                logger.info(f'{project.folder_name} - {work.name} 未能正确处理，需要人工介入')
+                failed_count += 1
+            if work.status == Work.DONE:
+                logger.info(f'{project.folder_name} - {work.name} 处理完成')
+                success_count += 1
         except Exception as e:
             logger.error(f'{project.folder_name} - {work.name} 处理失败，错误信息: {e}')
             continue
         finally:
             time.sleep(1)
 
+    logger.info('当前base dir中的buffalo项目所属的所有任务都已执行完毕')
+    logger.info(f'总共执行了 {job_count} 个任务，成功了 {success_count} 个，失败了 {failed_count} 个')
 
 def workflow(pdf_folder):
     # 获取所有PDF文件
