@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from buffalo import Buffalo, Work, Project
 from pdf2image import convert_from_path
+from ocr_tool import OCRTool
 
 from logging_config import setup_logger
 
@@ -50,6 +51,11 @@ class Config:
         except Exception:
             self.ocr_dpi = 150
 
+        try:
+            self.ocr_model_name = os.getenv("OCR_MODEL_NAME", "gpt-4o-mini")
+        except Exception:
+            self.ocr_model_name = "gpt-4o-mini"
+
         self._initialized = True
 
 
@@ -71,7 +77,7 @@ def pdf2img(project: Project, work: Work, config: Config):
     work.set_status(Work.IN_PROGRESS)
     project.save_project()
 
-    # 最大重试次数
+    # 将pdf转为图片这个操作，理论上不会失败，但仍然提供1次重试的机会
     retry_limit = 1
 
     while True:
@@ -105,8 +111,89 @@ def pdf2img(project: Project, work: Work, config: Config):
 
 def ocr(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
-    work.set_status(Work.DONE)
+    work.set_status(Work.IN_PROGRESS)
     project.save_project()
+
+    try:
+        image_files = sorted(project.project_path.glob('scan_*.png'))
+        logger.debug(f'{project.folder_name} - 找到 {len(image_files)} 张图片')
+        if not image_files:
+            logger.error(f'{project.folder_name} - 未找到扫描图片')
+            # retry is not necessary, not change status
+            return
+
+        # 先提取当前文件夹中所有的md文件
+        md_files = sorted(project.project_path.glob('*.md'))
+        logger.debug(f'{project.folder_name} - 找到 {len(md_files)} 个md文件')
+
+        ocr_tool = OCRTool(config.ocr_model_name)
+
+        md_content = ""
+        for img_path in image_files:
+            # 如果当前图片的md文件已存在，则跳过
+            if f'{img_path.stem}.md' in [md_file.name for md_file in md_files]:
+                logger.info(f'{img_path.name} 对应的md文件 {img_path.stem}.md 已存在，跳过')
+                try:
+                    with open(project.project_path / f'{img_path.stem}.md', 'r', encoding='utf-8') as f:
+                        current_page_content = f.read()
+                        if current_page_content is None or len(current_page_content) == 0:
+                            raise ValueError(f"{img_path.name} 对应的md文件 {img_path.stem}.md 虽然存在但内容为空")
+
+                        md_content += current_page_content + '\n\n'
+                    continue
+                except Exception as e:
+                    logger.error(f'{img_path.name} 对应的md文件 {img_path.stem}.md 虽然存在但读取失败: {str(e)}，从这里开始OCR')
+
+            logger.info(f'开始处理图片: {img_path.name}')
+
+            # 将图片转换为markdown，比较容易因为波动等原因发生失败，提供1次重试的机会
+            retry_limit = 1
+            while True:
+                try:
+                    current_page_content = ocr_tool.img2md(img_path)
+
+                    if current_page_content is None or len(current_page_content) == 0:
+                        raise ValueError("OCR识别结束，但结果为空")
+
+                    # 将当前结果保存到md文件中，如果文件已存在就直接覆盖
+                    current_page_md_path = project.project_path / f'{img_path.stem}.md'
+                    with open(current_page_md_path, 'w', encoding='utf-8') as f:
+                        f.write(current_page_content)
+
+                    md_content += current_page_content + '\n\n'
+
+                    break
+                except Exception as e:
+                    logger.error(f'{project.folder_name} - {work.name} 处理失败: {str(e)}，重试中...')
+                    if retry_limit > 0:
+                        retry_limit -= 1
+                        # 重试间隔10秒
+                        time.sleep(10)
+                        continue
+                    else:
+                        logger.error(f'{project.folder_name} - {work.name} 处理失败，超过重试次数限制，放弃')
+                        # over retry limit, not change status
+                        # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
+                        return
+
+        # 保存OCR结果
+        if md_content:
+            md_path = project.project_path / 'handbook.md'
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.write(md_content)
+            work.set_status(Work.DONE)
+            project.save_project()
+        else:
+            logger.error(f'{project.folder_name} - OCR未能提取任何有效内容，放弃')
+            # do not change status
+            # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
+            return
+
+    except Exception as e:
+        logger.error(f'{project.folder_name} - OCR处理失败: {str(e)}')
+        # do not change status
+        # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
+        return
 
 
 def translate(project: Project, work: Work, config: Config):
