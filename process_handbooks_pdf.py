@@ -11,6 +11,7 @@ from buffalo import Buffalo, Work, Project
 from pdf2image import convert_from_path
 from ocr_tool import OCRTool
 from translate_tool import TranslateTool
+from analysis_tool import AnalysisTool
 
 from logging_config import setup_logger
 
@@ -72,6 +73,20 @@ class Config:
             self.translate_model_name = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
         except Exception:
             self.translate_model_name = "gpt-4o-mini"
+
+        try:
+            self.analysis_model_name = os.getenv("OPENAI_ANALYSIS_MODEL", "gpt-4o-mini")
+        except Exception:
+            self.analysis_model_name = "gpt-4o-mini"
+
+        analysis_questions_file = os.getenv("ANALYSIS_QUESTIONS_FILE", "")
+        if not analysis_questions_file:
+            raise ValueError("ANALYSIS_QUESTIONS_FILE 环境变量未设置")
+        if not Path(analysis_questions_file).exists():
+            raise FileNotFoundError(f"ANALYSIS_QUESTIONS_FILE 文件不存在: {analysis_questions_file}")
+        with open(analysis_questions_file, 'r', encoding='utf-8') as f:
+            self.analysis_questions = f.read()
+
 
         self._initialized = True
 
@@ -260,8 +275,53 @@ def translate(project: Project, work: Work, config: Config):
 
 def analysis(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
-    work.set_status(Work.DONE)
+    work.set_status(Work.IN_PROGRESS)
     project.save_project()
+
+    try:
+        md_path = project.project_path / 'handbook.md'
+        if not md_path.exists():
+            raise FileNotFoundError(f'{project.folder_name} - handbook.md 文件不存在')
+
+        with open(md_path, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+
+        if not md_content.strip():
+            raise ValueError(f'{project.folder_name} - markdown文件内容为空')
+
+        analysis_tool = AnalysisTool(config.analysis_model_name, config.analysis_questions, config.translate_terms)
+        logger.info(f'开始使用 {config.analysis_model_name} 执行分析')
+
+        # 分析md内容，比较容易因为波动等原因发生失败，提供1次重试的机会
+        retry_limit = 1
+        while True:
+            try:
+                report_content = analysis_tool.md2report(md_content)
+                break
+            except Exception as e:
+                logger.error(f'{project.folder_name} - 分析失败: {str(e)}')
+                if retry_limit > 0:
+                    retry_limit -= 1
+                    time.sleep(10)
+                    continue
+                else:
+                    raise Exception(f'{project.folder_name} - 分析失败，超过重试次数限制，放弃') from e
+
+        if not report_content:
+            raise ValueError(f'{project.folder_name} - 分析失败')
+
+        report_path = project.project_path / 'handbook_report.md'
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report_content)
+
+        work.set_status(Work.DONE)
+        project.save_project()
+
+    except Exception as e:
+        logger.error(f'{project.folder_name} - {work.name} 处理失败: {str(e)}')
+        # do not change status
+        # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
+        return
 
 
 def output(project: Project, work: Work, config: Config):
