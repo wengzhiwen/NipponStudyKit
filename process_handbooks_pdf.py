@@ -5,6 +5,8 @@ import glob
 import os
 import sys
 from pathlib import Path
+import json
+import shutil
 
 from dotenv import load_dotenv
 from buffalo import Buffalo, Work, Project
@@ -12,6 +14,7 @@ from pdf2image import convert_from_path
 from ocr_tool import OCRTool
 from translate_tool import TranslateTool
 from analysis_tool import AnalysisTool
+from rename_analysis_tool import RenameAnalysisTool
 
 from logging_config import setup_logger
 
@@ -87,6 +90,10 @@ class Config:
         with open(analysis_questions_file, 'r', encoding='utf-8') as f:
             self.analysis_questions = f.read()
 
+        # 创建输出目录
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.output_folder = Path(f"pdf_with_md_{timestamp}")
+        self.output_folder.mkdir(exist_ok=True)
 
         self._initialized = True
 
@@ -326,8 +333,83 @@ def analysis(project: Project, work: Work, config: Config):
 
 def output(project: Project, work: Work, config: Config):
     logger.info(f'{project.folder_name} - {work.name} 开始处理')
-    work.set_status(Work.DONE)
+    work.set_status(Work.IN_PROGRESS)
     project.save_project()
+
+    try:
+        # 读取handbook.md文件
+        md_path = project.project_path / 'handbook.md'
+        if not md_path.exists():
+            raise FileNotFoundError(f'{project.folder_name} - handbook.md 文件不存在')
+
+        with open(md_path, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+
+        if not md_content.strip():
+            raise ValueError(f'{project.folder_name} - markdown文件内容为空')
+
+        # 创建分析工具并执行分析
+        analysis_tool = RenameAnalysisTool(config.analysis_model_name)
+        logger.info(f'开始使用 {config.analysis_model_name} 执行分析')
+
+        # 分析md内容，比较容易因为波动等原因发生失败，提供1次重试的机会
+        retry_limit = 1
+        while True:
+            try:
+                university_name, deadline = analysis_tool.md2report(md_content)
+                break
+            except Exception as e:
+                logger.error(f'{project.folder_name} - 分析失败: {str(e)}')
+                if retry_limit > 0:
+                    retry_limit -= 1
+                    time.sleep(10)
+                    continue
+                else:
+                    raise Exception(f'{project.folder_name} - 分析失败，超过重试次数限制，放弃') from e
+
+        if not university_name or not deadline:
+            raise ValueError(f'{project.folder_name} - 分析失败')
+
+        # 生成新的文件夹名
+        target_folder_name = f"{university_name}_{deadline}"
+        target_folder_name = target_folder_name.replace('/', '-')  # 替换日期中的斜杠
+        target_folder_name = target_folder_name.replace(' ', '_')  # 替换空格
+        target_folder_name = ''.join(c for c in target_folder_name if c.isalnum() or c in '_-')  # 只保留字母数字和_-字符
+
+        # 创建新的目标文件夹
+        target_folder = config.output_folder / target_folder_name
+        target_folder.mkdir(exist_ok=True)
+
+        # 复制所有文件到新位置
+        for file in project.project_path.glob('*'):
+            if file.is_file():
+                shutil.copy2(file, target_folder / file.name)
+
+        # 重命名PDF文件
+        handbook_pdf_path = target_folder / 'handbook.pdf'
+        handbook_pdf_path.rename(target_folder / f"{target_folder_name}.pdf")
+
+        # 重命名OCR MD文件
+        ocr_md_path = target_folder / 'handbook.md'
+        ocr_md_path.rename(target_folder / f"{target_folder_name}.md")
+
+        # 重命名翻译MD文件
+        translate_md_path = target_folder / 'handbook_zh.md'
+        translate_md_path.rename(target_folder / f"{target_folder_name}_中文.md")
+
+        # 重命名分析MD文件
+        report_md_path = target_folder / 'handbook_report.md'
+        report_md_path.rename(target_folder / f"{target_folder_name}_report.md")
+
+        work.set_status(Work.DONE)
+        project.save_project()
+        logger.info(f'{project.folder_name} - {work.name} 处理完成，输出到 {target_folder}')
+
+    except Exception as e:
+        logger.error(f'{project.folder_name} - {work.name} 处理失败: {str(e)}')
+        # do not change status
+        # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
+        return
 
 
 workers = {
@@ -375,6 +457,7 @@ def factory_start():
 
     logger.info('当前base dir中的buffalo项目所属的所有任务都已执行完毕')
     logger.info(f'总共执行了 {job_count} 个任务，成功了 {success_count} 个，失败了 {failed_count} 个')
+
 
 def workflow(pdf_folder):
     # 获取所有PDF文件
