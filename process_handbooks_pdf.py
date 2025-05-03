@@ -5,7 +5,6 @@ import glob
 import os
 import sys
 from pathlib import Path
-import json
 import shutil
 
 from dotenv import load_dotenv
