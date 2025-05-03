@@ -135,9 +135,7 @@ def ocr(project: Project, work: Work, config: Config):
         image_files = sorted(project.project_path.glob('scan_*.png'))
         logger.debug(f'{project.folder_name} - 找到 {len(image_files)} 张图片')
         if not image_files:
-            logger.error(f'{project.folder_name} - 未找到扫描图片')
-            # retry is not necessary, not change status
-            return
+            raise FileNotFoundError(f'{project.folder_name} - 未找到扫描图片')
 
         # 先提取当前文件夹中所有的md文件
         md_files = sorted(project.project_path.glob('*.md'))
@@ -159,7 +157,7 @@ def ocr(project: Project, work: Work, config: Config):
                         md_content += current_page_content + '\n\n'
                     continue
                 except Exception as e:
-                    logger.error(f'{img_path.name} 对应的md文件 {img_path.stem}.md 虽然存在但读取失败: {str(e)}，从这里开始OCR')
+                    logger.info(f'{img_path.name} 对应的md文件 {img_path.stem}.md 虽然存在但读取失败: {str(e)}，从这里开始OCR')
 
             logger.info(f'开始使用 {config.ocr_model_name} 处理图片: {img_path.name}')
 
@@ -188,10 +186,7 @@ def ocr(project: Project, work: Work, config: Config):
                         time.sleep(10)
                         continue
                     else:
-                        logger.error(f'{project.folder_name} - {work.name} 处理失败，超过重试次数限制，放弃')
-                        # over retry limit, not change status
-                        # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
-                        return
+                        raise Exception(f'{project.folder_name} - {work.name} 处理失败，超过重试次数限制，放弃') from e
 
         # 保存OCR结果
         if md_content:
@@ -201,10 +196,7 @@ def ocr(project: Project, work: Work, config: Config):
             work.set_status(Work.DONE)
             project.save_project()
         else:
-            logger.error(f'{project.folder_name} - OCR未能提取任何有效内容，放弃')
-            # do not change status
-            # 需要人类介入，排除问题后修改该work的状态到not_started后，重新启动即可从失败的地方开始继续
-            return
+            raise ValueError(f'{project.folder_name} - OCR未能提取任何有效内容，放弃')
 
     except Exception as e:
         logger.error(f'{project.folder_name} - OCR处理失败: {str(e)}')
