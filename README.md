@@ -1,90 +1,65 @@
-# PDF to Markdown Converter with Index Generation
+# 日本大学招生信息处理工具集
 
-This tool automates the process of converting PDF admission handbooks to markdown files with Chinese translations and organizing them based on university information.
+这是一个用于处理日本大学招生信息的综合工具集，主要包含三个核心模块：
 
-## Features
+## 1. 招生简章下载工具
 
-- Converts PDF files to PNG images
-- Performs OCR on images using Google Cloud Vision API
-- Creates markdown files with proper formatting using Gemini AI
-- Translates content to Chinese using Gemini AI
-- Analyzes admission information to identify valid handbooks
-- Organizes files by university name and application deadline
-- Generates detailed processing reports
+- `get_admissions_handbooks.py`: 自动获取日本各大学招生简章的工具
+- `pdf_downloader_tool.py`: PDF文件下载和管理的辅助工具
 
-## Prerequisites
+这两个工具目前是独立运行的，尚未完全整合。
 
-1. Python 3.8 or higher
-2. Google Cloud Vision API credentials
-3. Google Gemini AI API access
-4. `poppler-utils` for PDF processing:
-   - Ubuntu/Debian: `sudo apt-get install poppler-utils`
-   - macOS: `brew install poppler`
-   - Windows: Download from [poppler releases](http://blog.alivate.com.au/poppler-windows/)
+## 2. 招生简章处理工具
 
-## Setup
+核心功能：
+- PDF转PNG图片
+- 使用Google Cloud Vision API进行OCR识别
+- 使用Gemini AI生成格式化的Markdown文件
+- 使用Gemini AI进行中文翻译
+- 分析招生信息并识别有效的招生简章
+- 按大学名称和申请截止日期组织文件
+- 生成详细的处理报告
 
-1. Install dependencies:
+主要文件：
+- `process_handbooks_pdf.py`: 主处理脚本
+- `ocr_tool.py`: OCR处理工具
+- `translate_tool.py`: 翻译工具
+- `analysis_tool.py`: 内容分析工具
+- `rename_analysis_tool.py`: 文件重命名工具
+
+## 3. 博客写作工具
+
+- `11_blog_writer.py`: 用于生成日本大学招生相关博客文章的工具（开发中）
+
+
+## 安装设置
+
+1. 安装系统依赖：
 ```bash
+# Ubuntu/Debian
+sudo apt-get install poppler-utils
+
+# macOS
+brew install poppler
+
+# Windows
+# 从[poppler releases](http://blog.alivate.com.au/poppler-windows/)下载并安装
+```
+
+2. 安装Python依赖：
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# 或
+.\venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 ```
 
-2. Create a `.env` file with the following settings:
-```
-GOOGLE_ACCOUNT_KEY_JSON=/path/to/your/google-cloud-key.json
-GEMINI_MODEL_FOR_FORMAT_MD=gemini-1.5-flash
-GEMINI_MODEL_FOR_ORG_INFO=gemini-1.5-pro
-```
-
-## Directory Structure
-
-```
-.
-├── pdf/                    # Input directory for PDF files
-├── pdf_with_md_[datetime]/ # Output directory with processed files
-│   ├── [university_deadline]/  # One folder per valid handbook
-│   │   ├── [university_deadline].pdf
-│   │   ├── [university_deadline].md
-│   │   └── [university_deadline]_中文.md
-│   └── ...
-```
-
-## Usage
-
-1. Place PDF files in the `./pdf` directory
-2. Run the script:
+3. 配置环境变量：
 ```bash
-python pdf2img2md_make_index.py
+# 从示例文件复制并重命名
+cp .env.sample .env
 ```
 
-The script will:
-1. Create a timestamped output directory
-2. Process each PDF file:
-   - Convert to PNG images
-   - Perform OCR and create markdown
-   - Translate to Chinese
-   - Analyze if it's a valid admission handbook
-3. Organize valid handbooks by university name and deadline
-4. Generate a processing report with statistics
+然后编辑`.env`文件，填入您的配置信息。
 
-## Processing Report
-
-The script generates a report showing:
-- Total number of PDF files processed
-- Total pages converted to images
-- Number of valid admission handbooks
-- Output directory location
-
-## Error Handling
-
-- Invalid or non-admission handbooks are automatically removed
-- Detailed error messages for failed operations
-- Progress bars for long-running operations
-- Graceful handling of API failures
-
-## Notes
-
-- The script uses multi-threading for PDF to PNG conversion
-- OCR and AI operations are rate-limited by API quotas
-- Large PDF files may take longer to process
-- Ensure sufficient disk space for image files
