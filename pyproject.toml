@@ -8,7 +8,7 @@ COLUMN_LIMIT = 160
 
 [tool.pylint.'MESSAGES CONTROL']
 max-line-length = 160
-disable = "global-statement,broad-exception-caught,broad-exception-raised,missing-module-docstring,missing-class-docstring,missing-function-docstring,logging-fstring-interpolation,import-outside-toplevel"
+disable = "global-statement,broad-exception-caught,broad-exception-raised,missing-module-docstring,missing-class-docstring,missing-function-docstring,logging-fstring-interpolation,import-outside-toplevel,redefined-outer-name"
 
 [tool.isort]
 profile = "google"
