@@ -11,7 +11,7 @@
    - 适合处理大量独立的大学介绍文章
    使用方式：
    ```bash
-   python blog_writer.py -b <directory>
+   python blog_writer.py -b <directory> [-o <output_directory>]
    ```
 
 2. 对比分析模式 (Compare Mode)
@@ -23,7 +23,7 @@
    - 适合生成"某地区大学推荐"、"某类型大学对比"等主题文章
    使用方式：
    ```bash
-   python blog_writer.py -c <file1> [file2 ...]
+   python blog_writer.py -c <file1> [file2 ...] [-o <output_directory>]
    ```
 
 3. 材料扩展模式 (Expand Mode)
@@ -35,11 +35,11 @@
    - 支持多样化的写作角度和内容扩展
    使用方式：
    ```bash
-   python blog_writer.py -e <markdown_file> --prompt "<扩展写作方向>"
+   python blog_writer.py -e <markdown_file> --prompt "<扩展写作方向>" [-o <output_directory>]
    ```
 
 输出：
-- 生成的文章保存在 `blogs` 目录下
+- 生成的文章默认保存在 `blogs` 目录下，可通过 -o 参数指定其他输出目录
 - 处理日志保存在 `log` 目录下
 - 文章中的大学名称会自动添加对应的URL链接
 """
@@ -62,10 +62,9 @@ logger = setup_logger(logger_name="blog_writer", log_level="INFO")
 
 class ArticleWriter:
 
-    LOG_DIR = Path("log")
-    OUTPUT_DIR = Path("blogs")
+    log_dir = Path("log")
 
-    def __init__(self):
+    def __init__(self, output_dir: Optional[str] = None):
         load_dotenv()
 
         self.model = os.getenv("OPENAI_BLOG_WRITER_MODEL", "gpt-4o")
@@ -79,8 +78,14 @@ class ArticleWriter:
 
         self.university_utils = UniversityUtils()
 
-        self.OUTPUT_DIR.mkdir(exist_ok=True)
-        self.LOG_DIR.mkdir(exist_ok=True)
+        # 设置输出目录
+        if output_dir:
+            self.output_dir = Path(output_dir)
+        else:
+            self.output_dir = Path("blogs")
+
+        self.output_dir.mkdir(exist_ok=True)
+        self.log_dir.mkdir(exist_ok=True)
 
         self.article_writer: Optional[Agent] = None
         self.blog_formatter: Optional[Agent] = None
@@ -475,7 +480,7 @@ class ArticleWriter:
 
         logger.info(f"开始输出：{title}")
 
-        output_file = self.OUTPUT_DIR / f"{title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.md"
+        output_file = self.output_dir / f"{title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.md"
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(formatted_content)
@@ -483,9 +488,9 @@ class ArticleWriter:
         return "Success"
 
 
-def process_batch_mode(input_folder_path: Path) -> None:
+def process_batch_mode(input_folder_path: Path, output_dir: Optional[str] = None) -> None:
     try:
-        writer = ArticleWriter()
+        writer = ArticleWriter(output_dir)
 
         md_file_count = 0
         success_count = 0
@@ -512,9 +517,9 @@ def process_batch_mode(input_folder_path: Path) -> None:
         raise
 
 
-def process_compare_mode(input_files: list[Path]) -> None:
+def process_compare_mode(input_files: list[Path], output_dir: Optional[str] = None) -> None:
     try:
-        writer = ArticleWriter()
+        writer = ArticleWriter(output_dir)
 
         if len(input_files) < 1:
             raise ValueError("未指定任何文件")
@@ -545,9 +550,9 @@ def process_compare_mode(input_files: list[Path]) -> None:
         raise
 
 
-def process_expand_mode(input_file: Path, expand_prompt: str) -> None:
+def process_expand_mode(input_file: Path, expand_prompt: str, output_dir: Optional[str] = None) -> None:
     try:
-        writer = ArticleWriter()
+        writer = ArticleWriter(output_dir)
 
         logger.info(f"正在读取文件：{input_file}")
         try:
@@ -575,7 +580,8 @@ if __name__ == "__main__":
     group.add_argument('-b', '--batch', help='批量处理模式：处理指定文件夹中的所有markdown文件')
     group.add_argument('-c', '--compare', nargs='+', help='对比分析模式：处理指定的多个markdown文件并生成综合性文章（最多5个文件）')
     group.add_argument('-e', '--expand', help='材料扩展模式：基于指定的markdown文件和扩展方向生成文章')
-    parser.add_argument('--prompt', help='扩展写作方向（仅在材料扩展模式下使用）')
+    parser.add_argument('-p', '--prompt', help='扩展写作方向（仅在材料扩展模式下使用）')
+    parser.add_argument('-o', '--output', help='输出目录路径（可选，默认为"blogs"目录）')
     args = parser.parse_args()
 
     try:
@@ -591,7 +597,7 @@ if __name__ == "__main__":
             if not os.access(input_file, os.R_OK):
                 raise ValueError(f'没有权限读取指定的文件：{input_file}')
 
-            process_expand_mode(input_file, args.prompt)
+            process_expand_mode(input_file, args.prompt, args.output)
         elif args.compare:
             input_files = [Path(f) for f in args.compare]
             for file_path in input_files:
@@ -601,7 +607,7 @@ if __name__ == "__main__":
                     raise ValueError(f'指定的路径不是一个文件：{file_path}')
                 if not os.access(file_path, os.R_OK):
                     raise ValueError(f'没有权限读取指定的文件：{file_path}')
-            process_compare_mode(input_files)
+            process_compare_mode(input_files, args.output)
         else:
             input_folder = Path(args.batch)
             if not input_folder.exists():
@@ -612,13 +618,13 @@ if __name__ == "__main__":
                 raise ValueError(f'没有权限读取指定的文件夹：{input_folder}')
             if not any(input_folder.glob("*.md")):
                 raise ValueError(f'指定的文件夹中没有找到任何.md文件：{input_folder}')
-            process_batch_mode(input_folder)
+            process_batch_mode(input_folder, args.output)
     except ValueError as e:
         logger.error(str(e))
         print('Usage:')
-        print('  批量处理模式: python blog_writer.py -b <directory>')
-        print('  对比分析模式: python blog_writer.py -c <file1> [file2 ...]')
-        print('  材料扩展模式: python blog_writer.py -e <markdown_file> --prompt "<扩展写作方向>"')
+        print('  批量处理模式: python blog_writer.py -b <directory> [-o <output_directory>]')
+        print('  对比分析模式: python blog_writer.py -c <file1> [file2 ...] [-o <output_directory>]')
+        print('  材料扩展模式: python blog_writer.py -e <markdown_file> --prompt "<扩展写作方向>" [-o <output_directory>]')
         sys.exit(1)
     except Exception as e:
         logger.error(f'处理过程中发生未预期的错误：{str(e)}')
