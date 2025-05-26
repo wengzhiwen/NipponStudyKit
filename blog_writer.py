@@ -63,9 +63,9 @@ logger = setup_logger(logger_name="blog_writer", log_level="INFO")
 class ArticleWriter:
 
     LOG_DIR = Path("log")
-    OUTPUT_DIR = Path("blogs")
+    OUTPUT_DIR = Path("./")
 
-    def __init__(self):
+    def __init__(self, output_dir: Optional[str] = None):
         load_dotenv()
 
         self.model = os.getenv("OPENAI_BLOG_WRITER_MODEL", "gpt-4o")
@@ -79,7 +79,11 @@ class ArticleWriter:
 
         self.university_utils = UniversityUtils()
 
-        self.OUTPUT_DIR.mkdir(exist_ok=True)
+        # 如果指定了输出目录，使用指定的目录，否则使用默认目录
+        if output_dir:
+            self.output_dir = Path(output_dir)
+        
+        self.output_dir.mkdir(exist_ok=True)
         self.LOG_DIR.mkdir(exist_ok=True)
 
         self.article_writer: Optional[Agent] = None
@@ -337,9 +341,9 @@ class ArticleWriter:
                     "role":
                     "user",
                     "content":
-                    f"""请根据以下多所大学的信息，撰写一篇综合性的日本留学的BLOG。
+                    """请根据以下多所大学的信息，撰写一篇综合性的日本留学的BLOG。
 
-{'\n\n'.join(article_summaries)}
+""" + '\n\n'.join(article_summaries) + """
 
 ----
 以上是所有提供给你的材料。
@@ -475,7 +479,7 @@ class ArticleWriter:
 
         logger.info(f"开始输出：{title}")
 
-        output_file = self.OUTPUT_DIR / f"{title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.md"
+        output_file = self.output_dir / f"{title}_{datetime.now().strftime('%Y%m%d%H%M%S')}.md"
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(formatted_content)
@@ -483,9 +487,9 @@ class ArticleWriter:
         return "Success"
 
 
-def process_batch_mode(input_folder_path: Path) -> None:
+def process_batch_mode(input_folder_path: Path, output_dir: Optional[str] = None) -> None:
     try:
-        writer = ArticleWriter()
+        writer = ArticleWriter(output_dir)
 
         md_file_count = 0
         success_count = 0
@@ -512,9 +516,9 @@ def process_batch_mode(input_folder_path: Path) -> None:
         raise
 
 
-def process_compare_mode(input_files: list[Path]) -> None:
+def process_compare_mode(input_files: list[Path], output_dir: Optional[str] = None) -> None:
     try:
-        writer = ArticleWriter()
+        writer = ArticleWriter(output_dir)
 
         if len(input_files) < 1:
             raise ValueError("未指定任何文件")
@@ -545,9 +549,9 @@ def process_compare_mode(input_files: list[Path]) -> None:
         raise
 
 
-def process_expand_mode(input_file: Path, expand_prompt: str) -> None:
+def process_expand_mode(input_file: Path, expand_prompt: str, output_dir: Optional[str] = None) -> None:
     try:
-        writer = ArticleWriter()
+        writer = ArticleWriter(output_dir)
 
         logger.info(f"正在读取文件：{input_file}")
         try:
@@ -576,6 +580,7 @@ if __name__ == "__main__":
     group.add_argument('-c', '--compare', nargs='+', help='对比分析模式：处理指定的多个markdown文件并生成综合性文章（最多5个文件）')
     group.add_argument('-e', '--expand', help='材料扩展模式：基于指定的markdown文件和扩展方向生成文章')
     parser.add_argument('--prompt', help='扩展写作方向（仅在材料扩展模式下使用）')
+    parser.add_argument('-o', '--output', help='指定输出目录（默认为当前目录）')
     args = parser.parse_args()
 
     try:
@@ -591,7 +596,7 @@ if __name__ == "__main__":
             if not os.access(input_file, os.R_OK):
                 raise ValueError(f'没有权限读取指定的文件：{input_file}')
 
-            process_expand_mode(input_file, args.prompt)
+            process_expand_mode(input_file, args.prompt, args.output)
         elif args.compare:
             input_files = [Path(f) for f in args.compare]
             for file_path in input_files:
@@ -601,7 +606,7 @@ if __name__ == "__main__":
                     raise ValueError(f'指定的路径不是一个文件：{file_path}')
                 if not os.access(file_path, os.R_OK):
                     raise ValueError(f'没有权限读取指定的文件：{file_path}')
-            process_compare_mode(input_files)
+            process_compare_mode(input_files, args.output)
         else:
             input_folder = Path(args.batch)
             if not input_folder.exists():
@@ -612,7 +617,7 @@ if __name__ == "__main__":
                 raise ValueError(f'没有权限读取指定的文件夹：{input_folder}')
             if not any(input_folder.glob("*.md")):
                 raise ValueError(f'指定的文件夹中没有找到任何.md文件：{input_folder}')
-            process_batch_mode(input_folder)
+            process_batch_mode(input_folder, args.output)
     except ValueError as e:
         logger.error(str(e))
         print('Usage:')
