@@ -62,7 +62,8 @@ logger = setup_logger(logger_name="blog_writer", log_level="INFO")
 
 class ArticleWriter:
 
-    log_dir = Path("log")
+    LOG_DIR = Path("log")
+    DEFAULT_OUTPUT_DIR = Path("blogs")
 
     def __init__(self, output_dir: Optional[str] = None):
         load_dotenv()
@@ -78,14 +79,14 @@ class ArticleWriter:
 
         self.university_utils = UniversityUtils()
 
-        # 设置输出目录
+        # 设置输出目录：如果指定了输出目录，使用指定的目录，否则使用默认目录
         if output_dir:
             self.output_dir = Path(output_dir)
         else:
-            self.output_dir = Path("blogs")
+            self.output_dir = self.DEFAULT_OUTPUT_DIR
 
         self.output_dir.mkdir(exist_ok=True)
-        self.log_dir.mkdir(exist_ok=True)
+        self.LOG_DIR.mkdir(exist_ok=True)
 
         self.article_writer: Optional[Agent] = None
         self.blog_formatter: Optional[Agent] = None
@@ -342,9 +343,9 @@ class ArticleWriter:
                     "role":
                     "user",
                     "content":
-                    f"""请根据以下多所大学的信息，撰写一篇综合性的日本留学的BLOG。
+                    """请根据以下多所大学的信息，撰写一篇综合性的日本留学的BLOG。
 
-{'\n\n'.join(article_summaries)}
+""" + '\n\n'.join(article_summaries) + """
 
 ----
 以上是所有提供给你的材料。
@@ -581,7 +582,7 @@ if __name__ == "__main__":
     group.add_argument('-c', '--compare', nargs='+', help='对比分析模式：处理指定的多个markdown文件并生成综合性文章（最多5个文件）')
     group.add_argument('-e', '--expand', help='材料扩展模式：基于指定的markdown文件和扩展方向生成文章')
     parser.add_argument('-p', '--prompt', help='扩展写作方向（仅在材料扩展模式下使用）')
-    parser.add_argument('-o', '--output', help='输出目录路径（可选，默认为"blogs"目录）')
+    parser.add_argument('-o', '--output', help='指定输出目录（默认为"blogs"目录）')
     args = parser.parse_args()
 
     try:
